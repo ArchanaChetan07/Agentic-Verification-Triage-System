@@ -89,6 +89,28 @@ class FailureEvent:
 
 
 @dataclass
+class EvidenceCitation:
+    """One piece of evidence backing a drafted bug entry — always traceable
+    back to a specific parsed artifact, never a free-text LLM claim on its
+    own (Objective #3: zero unsupported claims)."""
+    kind: str            # "log_event" | "coverage_hole" | "code_coverage"
+    detail: str          # human-readable, but built from parsed fields only
+
+
+@dataclass
+class BugDraft:
+    """One entry in the Drafter Agent's prioritized bug list (Section 5.2)."""
+    cluster_id: str
+    probable_root_cause: str
+    affected_tests: list[str]
+    evidence: list[EvidenceCitation] = field(default_factory=list)
+    priority_score: float = 0.0
+    priority_rationale: str = ""
+    generator: str = "evidence_template"   # "evidence_template" | "llm"
+    needs_llm_review: bool = False
+
+
+@dataclass
 class FailureSignature:
     """Compact feature representation of a failing test, built from its log.
 

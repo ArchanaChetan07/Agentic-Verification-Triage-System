@@ -6,13 +6,13 @@ retargeting [AgentMesh](https://github.com/ArchanaChetan07/Cost-aware-agent-orch
 domain. See `Agentic_Verification_Triage_System_Proposal.md` for the full
 design doc.
 
-## Status: Phase 3 of 7 — Clusterer Agent ✅ (Drafter/Critic in progress)
+## Status: Phase 3 of 7 — Clusterer + Drafter ✅ (Critic next)
 
 | Phase | Status |
 |---|---|
 | 1. Domain onboarding | done (this repo) |
 | 2. Parsing layer | done |
-| **3. AgentMesh retargeting** | **Clusterer Agent done; Drafter/Critic next** |
+| **3. AgentMesh retargeting** | **Clusterer + Drafter done; Critic next** |
 | 4. Bug seeding & test harness (real OpenTitan/PicoRV32 regressions) | not started |
 | 5. Observability integration | not started |
 | 6. Evaluation & validation report | not started |
@@ -29,9 +29,10 @@ triage/
     log_signature.py            # UVM_ERROR/UVM_FATAL log -> FailureSignature
   agents/
     clusterer.py                 # structured-similarity clustering + LLM-review flagging
+    drafter.py                    # evidence-grounded bug list drafting
 tests/
   fixtures/                     # synthetic regression w/ 3 seeded bug clusters
-  test_*.py                     # 24 unit tests, all passing
+  test_*.py                     # 34 unit tests, all passing
 vendor/agentmesh/                # git submodule: the real AgentMesh core (reused, not forked)
 ```
 
@@ -104,14 +105,50 @@ git submodule update --init
 pytest -q
 ```
 
+### Drafter Agent (`triage/agents/drafter.py`)
+
+Follows the same honest-generator split the vendored AgentMesh itself uses
+(`generators.py`'s `BackendGenerator` vs `TrivialStubGenerator`):
+`EvidenceBasedDraftGenerator` composes every field of a `BugDraft` — root
+cause, affected tests, evidence citations, priority score — directly from
+parsed `FailureSignature`/`CoverageReport` data. No LLM call, so it's
+deterministic, fully unit-tested, and structurally guarantees Objective #3
+("every bug list entry traceable to specific failing tests and coverage
+evidence — zero unsupported claims"): there's nothing in a draft that
+wasn't in the input evidence, and `test_every_evidence_citation_traces_to_real_input_data`
+checks exactly that.
+
+Priority score = severity component (FATAL > ERROR) + cluster-size
+component + linked-coverage-hole component, fully explained in
+`priority_rationale` rather than a black-box number. On the fixture set,
+the FIFO cluster (contains a `UVM_FATAL`) correctly outranks every
+ERROR-only cluster regardless of coverage-hole count, and the singleton
+ambiguous cluster from the Clusterer ranks lowest and stays flagged
+`needs_llm_review=True` rather than being drafted with false confidence.
+
+Coverage/module relevance uses a stated keyword-overlap heuristic
+(`related_coverage_holes`/`related_code_coverage`) — e.g. hierarchy path
+`...fifo_agent.monitor` matches covergroup `fifo_cg` and module
+`fifo_unit` via the shared "fifo" token. This is an explicit heuristic,
+not a claim of true testbench-structure understanding; a production
+version would consume the testbench's actual module hierarchy map.
+
+A future `LLMDraftGenerator` would wrap `Mesh`/`AdaptiveRouter` (mirroring
+`BackendGenerator`) to turn this evidence into more polished prose, or to
+resolve `needs_llm_review` clusters the Clusterer couldn't merge on
+structure alone — not implemented yet.
+
 ## Next (rest of Phase 3)
 
+- Wire an actual LLM call through `Mesh`/`AdaptiveRouter` for
+  `needs_llm_review` clusters (semantic grouping fallback) and/or prose
+  polishing of drafts — the vendored submodule's simulated backend only
+  produces placeholder text (`VALID_STEP_OUTPUT`/`FLAWED_STEP_OUTPUT`), so
+  this needs either a real endpoint (`ModelSpec.endpoint`) or an
+  API-key-backed generator, following the `BackendGenerator` pattern
 - Add `"triage"` to `ROLE_SEQUENCES` in a config layer on top of the
-  AgentMesh submodule (not editing it directly)
-- Wire the `needs_llm_review` clusters from the Clusterer above into an
-  actual LLM call via `Mesh`/`AdaptiveRouter` for semantic grouping
-- Implement Drafter Agent: evidence-cited bug list per cluster (root cause,
-  affected tests, cited coverage holes + log evidence, priority score)
+  AgentMesh submodule (not editing it directly), so clusterer/drafter/critic
+  steps get traced the same way planner/coder/critic are today
 - Implement Critic Agent: flags drafted entries unsupported by the
   underlying evidence; measure both false positives caught and new false
   negatives introduced (per the proposal's risk mitigation)
