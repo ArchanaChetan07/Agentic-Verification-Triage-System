@@ -1,0 +1,9 @@
+TEST: uvm_test_picorv32_add  SEED: N/A  STATUS: PASSED  TIME: 20.7s
+TEST: uvm_test_picorv32_sub  SEED: N/A  STATUS: PASSED  TIME: 20.5s
+TEST: uvm_test_picorv32_auipc  SEED: N/A  STATUS: PASSED  TIME: 20.4s
+TEST: uvm_test_picorv32_div  SEED: N/A  STATUS: PASSED  TIME: 20.4s
+TEST: uvm_test_picorv32_mul  SEED: N/A  STATUS: PASSED  TIME: 20.5s
+TEST: uvm_test_picorv32_beq  SEED: N/A  STATUS: PASSED  TIME: 20.7s
+TEST: uvm_test_picorv32_sra  SEED: N/A  STATUS: PASSED  TIME: 20.8s
+TEST: uvm_test_picorv32_srai  SEED: N/A  STATUS: PASSED  TIME: 20.4s
+TEST: uvm_test_picorv32_srl  SEED: N/A  STATUS: PASSED  TIME: 20.6s

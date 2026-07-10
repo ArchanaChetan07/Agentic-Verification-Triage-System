@@ -6,94 +6,92 @@ retargeting [AgentMesh](https://github.com/ArchanaChetan07/Cost-aware-agent-orch
 domain. See `Agentic_Verification_Triage_System_Proposal.md` for the full
 design doc.
 
-## Status: Phase 4 of 7 — in progress (real infra proven; harness design issue found)
+## Status: Phase 4 of 7 — in progress (isolated harness working; real bug reproduced; UVM gap identified)
 
 | Phase | Status |
 |---|---|
 | 1. Domain onboarding | done (this repo) |
-| 2. Parsing layer | done |
+| 2. Parsing layer | done — validated against real sim output, see below |
 | 3. AgentMesh retargeting | done — Clusterer, Drafter, Critic all implemented |
-| **4. Bug seeding & test harness** | **real toolchain/simulator/design working; harness redesign needed before real bug seeding produces usable multi-test regressions — see below** |
+| **4. Bug seeding & test harness** | **isolated per-test harness built and confirmed working against real hardware bugs; structured-log gap found — see below** |
 | 5. Observability integration | not started |
 | 6. Evaluation & validation report | not started |
 | 7. Documentation & demo | not started |
 
-### Phase 4 progress: what's real so far
+### Phase 4: real infra, real bug, real result
 
-Set up an actual, working simulation pipeline in-sandbox — no synthetic
-data involved:
+Building on the harness-design finding from the previous session (stock
+PicoRV32 firmware links all 45 tests into one linear image that halts
+permanently on the first failure), this session fixed it:
 
-- **Real toolchain**: `gcc-riscv64-unknown-elf` (Ubuntu package) with full
-  RV32 multilib support, compiling real firmware
-- **Real simulator**: Icarus Verilog 12.0 (`iverilog`/`vvp`)
-- **Real design**: [PicoRV32](https://github.com/YosysHQ/picorv32) (the
-  proposal's Appendix pick for "controlled, easily-labeled bug seeding"),
-  built and simulated unmodified — `ALL TESTS PASSED`, including all 45
-  individual RV32IM instruction tests under `tests/*.S`
+- `real_data/picorv32_patches/start_single.S` — a minimal patch to
+  PicoRV32's `firmware/start.S` (wrap the `TEST(...)` chain in
+  `#ifdef SINGLE_TEST_ONLY` / `TEST_INDIRECT(SINGLE_TEST_NAME)`) that lets
+  exactly one instruction test run as its own isolated simulation, so
+  failures no longer prevent other tests from running
+- `scripts/run_single_picorv32_test.sh` — builds and simulates one test in
+  isolation (real `riscv64-unknown-elf-gcc`, real Icarus Verilog) and
+  prints one line in our existing `TEST: ... SEED: ... STATUS: ... TIME:`
+  format. `testbench.vvp` (the compiled RTL) only needs rebuilding when the
+  RTL itself changes — per-test reruns just swap `firmware.hex`
+- Hit and fixed a real classic C-preprocessor bug along the way: `##`
+  token-pasting doesn't macro-expand its operand first, so
+  `TEST(SINGLE_TEST_NAME)` pasted the literal macro name instead of the
+  test name until routed through an indirection macro
+  (`TEST_INDIRECT(n) → TEST(n)`)
+- **Honest field, not fabricated**: this testbench has no `$random`
+  seeding, so `SEED` is reported as `N/A` (our parser already handles a
+  non-numeric seed → `seed=None`) rather than inventing a plausible-looking
+  number
 
-### Real finding: the stock harness can't produce a multi-failure regression as-is
+**Confirming the fix actually fixed the problem, not just moved it**: with
+only the `alu_add_sub` (SUB-as-ADD) bug seeded, isolated runs show `sub`
+genuinely FAILED and — importantly — `auipc` **also** genuinely FAILED, on
+its own, with no other test run before it. Checking `tests/auipc.S`
+confirms this is real, not an artifact: the test's own self-check code
+literally executes `sub a0, a0, a1` to validate the address `auipc`
+computed. So `sub` and `auipc` share a real root cause for a real reason —
+a genuine 2-test correlated failure from one real RTL bug, captured in
+`real_data/runs/sub_bug_seeded_regression.log` (clean-RTL control run in
+`real_data/runs/clean_rtl_regression.log`), everything else in the sample
+passing. **`regression_parser.py` — written in Phase 2 against synthetic
+fixtures — parses this real log at 100%, zero changes needed.**
 
-PicoRV32's `firmware/start.S` links **all 45 instruction tests into one
-linear firmware image**, executed as a single simulation. Each test signals
-pass/fail by writing `OK`/`ERROR` to a memory-mapped print port, and a
-failing test executes `ebreak` — which, in this design, **permanently halts
-the CPU** (there's no debugger to resume it). There is no per-test
-isolation: it's one simulation, one linear instruction stream.
+### Real limitation found: no structured error taxonomy without UVM
 
-This was discovered empirically, not by reading docs first: I seeded two
-RTL bugs into `picorv32.v` —
+PicoRV32's testbench prints a bare `testname..OK` / `testname..ERROR` —
+there is no `UVM_ERROR`/message-ID/hierarchy-path structure the way a real
+UVM regression log has. `log_signature.py`'s `FailureSignature` (msg_ids +
+hierarchy_paths) is exactly the feature the Clusterer clusters on, and
+there's nothing here for it to extract. Ground truth for *this* pair
+(`sub`+`auipc` share a bug) is only knowable because we seeded it and read
+the RTL diff — not something the pipeline could discover from this log
+alone.
 
-1. `alu_add_sub` forced to always add (`instr_sub ? ... : ...` → always the
-   `+` branch) — intended to break only the `sub` test
-2. `alu_shr`'s sign-extend bit hardcoded to `1'b0` — intended to break `sra`
-   and `srai` together (a real 2-test, 1-root-cause case, matching exactly
-   the correlated-failure scenario our synthetic fixtures modeled)
+This confirms rather than works around the proposal's original design
+choice: PicoRV32 is genuinely useful as **infra-proof and harness
+validation** (real toolchain, real simulator, real bug, real correlated
+failure, real parser compatibility — all now demonstrated), but Section
+7's actual cluster-purity methodology needs a **UVM environment** (e.g.
+OpenTitan) where `UVM_ERROR`/hierarchy/message-ID structure genuinely
+exists in the logs for `log_signature.py` and the Clusterer to work with.
 
-Rerunning the regression, the **first** test to fail was `auipc` — not
-`sub` or `sra` at all. `auipc.S`'s compiler-generated code happened to
-contain a `sub` instruction (likely stack/pointer arithmetic in its
-prologue), so bug #1 corrupted it before the CPU ever reached the tests I
-meant to target. And because `ebreak` halts the CPU permanently, the
-simulation stopped right there — `sub`, `sra`, and `srai` never ran, pass
-or fail. (Confirmed by checking `start.S`'s test order: `auipc` at line
-404, `srai`/`sub`/`sra` at lines 433–441 — the CPU never got that far.)
+### Next
 
-Two real, reportable lessons from this, consistent with the proposal's
-own risk-mitigation discipline (Section 9: budget explicit time for
-adapting reused/external interfaces rather than assuming a drop-in fit):
-
-1. **A "one-instruction" bug isn't isolated** if that instruction is
-   something the compiler emits for unrelated code (subtraction is
-   everywhere in generated prologues/pointer arithmetic) — seeded bugs
-   need to be chosen for genuine blast-radius control, not just semantic
-   narrowness.
-2. **A monolithic, halt-on-first-failure firmware image is structurally
-   the wrong shape** for a multi-test regression. To get real per-test
-   pass/fail/timeout data (matching what `regression_parser.py` expects
-   and what a real UVM regression actually looks like — many independent
-   test runs, not one linear program), each test needs to run as its own
-   isolated simulation.
-
-### Next: harness fix, then real bug seeding
-
-- Build a minimal per-test firmware harness: one simulation per test
-  (reuse `start.o`'s setup code, but call exactly one test function and
-  halt cleanly, rather than chaining all 45) — this makes each test
-  independently pass/fail/timeout, the way a real regression list works
-- Re-seed the two bugs above (they're still good choices — `sra`/`srai`
-  in particular is a clean real 2-test/1-root-cause case) against the
-  per-test harness and confirm blast radius is actually contained this
-  time
-- Convert the real console `testname..OK`/`testname..ERROR` output into
-  our existing `TEST: ... SEED: ... STATUS: ... TIME: ...` format (a small
-  adapter script, not a parser rewrite) and run it through the real
-  Parsing → Clusterer → Drafter → Critic pipeline already built in Phases
-  2–3, unchanged
-- Scale up from 2 to the proposal's target 15–25 seeded bugs once the
-  per-test harness is confirmed working, then move to OpenTitan for a
-  true UVM environment (PicoRV32's testbench, as this session found, is
-  plain Verilog, not UVM/class-based — fine for this harness-validation
-  step, but Section 7's real methodology needs a UVM-based design)
+- Move to an OpenTitan UVM testbench for real `log_signature.py` /
+  Clusterer validation — this is the step that actually exercises
+  Sections 5.1/5.2 against real UVM-structured logs
+  the same isolated-per-test lesson from this session likely applies
+  there too (check for similar linear-regression-halts-on-failure
+  patterns before assuming continuation works)
+- Scale from today's 1 seeded bug to the proposal's 15–25 once a UVM
+  environment is in place
+- Wire `real_data/runs/sub_bug_seeded_regression.log` through the full
+  Parsing → Clusterer → Drafter → Critic pipeline as an integration test
+  (clustering will trivially put `sub`/`auipc` in one cluster today only
+  because there are just 2 failures with no distinguishing signature to
+  split on — worth having as a regression test, but not a substitute for
+  real cluster-purity validation against UVM data)
 
 ## What's here
 
@@ -110,7 +108,12 @@ triage/
     critic.py                     # independent evidence verification against drafts
 tests/
   fixtures/                     # synthetic regression w/ 3 seeded bug clusters
-  test_*.py                     # 39 unit tests, all passing
+  test_*.py                     # 42 unit/integration tests, all passing
+real_data/
+  picorv32_patches/start_single.S  # per-test isolation patch for PicoRV32's harness
+  runs/*.log                    # REAL Icarus Verilog simulation output (see Phase 4)
+scripts/
+  run_single_picorv32_test.sh   # builds + simulates one PicoRV32 test in isolation
 vendor/agentmesh/                # git submodule: the real AgentMesh core (reused, not forked)
 ```
 
