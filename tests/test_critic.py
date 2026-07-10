@@ -14,7 +14,7 @@ score 100% catch rate but fail the false-negative check below.
 import copy
 import os
 
-from tests.test_clusterer import _all_signatures
+from tests._shared_signatures import all_signatures as _all_signatures
 from triage.agents.clusterer import cluster_failures
 from triage.agents.critic import CriticAgent, critique_bug_list
 from triage.agents.drafter import draft_bug_list

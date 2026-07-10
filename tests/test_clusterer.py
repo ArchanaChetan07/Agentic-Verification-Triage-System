@@ -1,26 +1,9 @@
 import os
 
 from triage.agents.clusterer import cluster_failures, signature_similarity
-from triage.parsing.log_signature import build_failure_signature_file
+from tests._shared_signatures import ALL_FAILING_TESTS, all_signatures as _all_signatures
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "failure_logs")
-
-ALL_FAILING_TESTS = [
-    "uvm_test_alu_overflow",
-    "uvm_test_alu_overflow_neg",
-    "uvm_test_fifo_full_write",
-    "uvm_test_fifo_almost_full",
-    "uvm_test_apb_reset",
-    "uvm_test_apb_reset_seed2",
-    "uvm_test_apb_addr_decode",
-]
-
-
-def _all_signatures():
-    return [
-        build_failure_signature_file(name, os.path.join(FIXTURES, f"{name}.log"))
-        for name in ALL_FAILING_TESTS
-    ]
 
 
 def _cluster_containing(clusters, test_name):
