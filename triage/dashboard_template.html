@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Verification Triage — Observability Dashboard</title>
+<style>
+  :root { --bg:#0f1216; --panel:#171b21; --line:#2a2f38; --fg:#e6e9ef; --muted:#8b93a1;
+          --accent:#5aa9ff; --good:#4fd39a; --bad:#ff6b6b; --warn:#ffb15a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; }
+  header { padding:20px 28px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0 0 4px; font-size:18px; }
+  header .sub { color:var(--muted); font-size:12px; }
+  main { padding:24px 28px; display:grid; gap:20px; grid-template-columns: repeat(auto-fit, minmax(360px,1fr)); }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px; }
+  .panel h2 { margin:0 0 14px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  .kpis { display:flex; gap:18px; flex-wrap:wrap; }
+  .kpi { min-width:90px; }
+  .kpi .num { font-size:26px; font-weight:600; }
+  .kpi .label { color:var(--muted); font-size:11px; text-transform:uppercase; }
+  .bar-row { display:flex; align-items:center; gap:10px; margin:8px 0; }
+  .bar-row .name { width:150px; font-size:12px; color:var(--muted); flex-shrink:0; }
+  .bar-track { flex:1; background:#232833; border-radius:4px; overflow:hidden; height:16px; }
+  .bar-fill { height:100%; background:var(--accent); }
+  .bar-val { width:64px; text-align:right; font-size:12px; color:var(--muted); }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; }
+  .pill { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; }
+  .pill.ok { background:rgba(79,211,154,.15); color:var(--good); }
+  .pill.bad { background:rgba(255,107,107,.15); color:var(--bad); }
+  .pill.warn { background:rgba(255,177,90,.15); color:var(--warn); }
+  .pill.method { background:rgba(90,169,255,.15); color:var(--accent); }
+  .flags { color:var(--bad); font-size:11px; }
+  .empty { color:var(--muted); font-style:italic; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Verification Triage — Observability Dashboard</h1>
+  <div class="sub" id="subtitle"></div>
+</header>
+<main id="main"></main>
+<script>
+const DATA = /*__DATA__*/null;
+
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs||{})) {
+    if (k === 'class') e.className = v; else e.setAttribute(k, v);
+  }
+  for (const c of children) e.append(c && c.nodeType ? c : document.createTextNode(c ?? ''));
+  return e;
+}
+
+function renderKPIs(data) {
+  const t = data.totals;
+  const panel = el('div', {class:'panel'});
+  panel.append(el('h2', {}, 'Pipeline Summary'));
+  const kpis = el('div', {class:'kpis'});
+  const add = (num,label) => kpis.append(el('div',{class:'kpi'}, el('div',{class:'num'},String(num)), el('div',{class:'label'},label)));
+  add(t.clusters, 'Clusters');
+  add(t.drafts, 'Drafts');
+  add(t.accepted, 'Critic Accepted');
+  add(t.rejected, 'Critic Rejected');
+  add(t.needsReview, 'Needs LLM Review');
+  add((data.parseRate*100).toFixed(0)+'%', 'Parse Rate');
+  panel.append(kpis);
+  return panel;
+}
+
+function renderStageTimeline(data) {
+  const panel = el('div', {class:'panel'});
+  panel.append(el('h2', {}, 'Stage Timeline (traced spans)'));
+  const stages = data.stageTimeline.filter(s => s.name.startsWith('agent.') || s.name.startsWith('parse.') || s.name === 'triage.pipeline');
+  const max = Math.max(1, ...stages.map(s => s.durationMs));
+  for (const s of stages) {
+    const row = el('div', {class:'bar-row'});
+    row.append(el('div', {class:'name'}, s.name));
+    const track = el('div', {class:'bar-track'});
+    track.append(el('div', {class:'bar-fill', style:`width:${Math.max(2,(s.durationMs/max)*100)}%`}));
+    row.append(track);
+    row.append(el('div', {class:'bar-val'}, s.durationMs.toFixed(2)+'ms'));
+    panel.append(row);
+  }
+  return panel;
+}
+
+function renderMethodBreakdown(data) {
+  const panel = el('div', {class:'panel'});
+  panel.append(el('h2', {}, 'Clusterer: Method Breakdown'));
+  const counts = data.methodCounts;
+  const max = Math.max(1, ...Object.values(counts));
+  for (const [method, count] of Object.entries(counts)) {
+    const row = el('div', {class:'bar-row'});
+    row.append(el('div', {class:'name'}, el('span',{class:'pill method'}, method)));
+    const track = el('div', {class:'bar-track'});
+    track.append(el('div', {class:'bar-fill', style:`width:${(count/max)*100}%`}));
+    row.append(track);
+    row.append(el('div', {class:'bar-val'}, String(count)));
+    panel.append(row);
+  }
+  const note = el('div', {class:'sub'},
+    'exact_key = identical structured signature (no LLM needed). similarity = fuzzy structured match above merge threshold. singleton = below merge threshold; needs_llm_review flags the genuinely ambiguous ones.');
+  note.style.marginTop = '12px';
+  panel.append(note);
+  return panel;
+}
+
+function renderCriticSummary(data) {
+  const panel = el('div', {class:'panel'});
+  panel.append(el('h2', {}, 'Critic Agent'));
+  const c = data.criticSummary || {};
+  const kpis = el('div', {class:'kpis'});
+  const add = (num,label) => kpis.append(el('div',{class:'kpi'}, el('div',{class:'num'},String(num)), el('div',{class:'label'},label)));
+  add(c['critic.total'] ?? 0, 'Reviewed');
+  add(c['critic.accepted'] ?? 0, 'Accepted');
+  add(c['critic.rejected'] ?? 0, 'Rejected');
+  add(((c['critic.override_rate'] ?? 0)*100).toFixed(0)+'%', 'Override Rate');
+  panel.append(kpis);
+  return panel;
+}
+
+function renderPriorityDistribution(data) {
+  const panel = el('div', {class:'panel'});
+  panel.append(el('h2', {}, 'Priority Score Distribution'));
+  const dist = data.priorityDistribution;
+  if (!dist.length) { panel.append(el('div',{class:'empty'},'no drafts')); return panel; }
+  const max = Math.max(...dist.map(d=>d.score), 0.01);
+  for (const d of dist) {
+    const row = el('div', {class:'bar-row'});
+    row.append(el('div', {class:'name'}, d.clusterId));
+    const track = el('div', {class:'bar-track'});
+    track.append(el('div', {class:'bar-fill', style:`width:${(d.score/max)*100}%`}));
+    row.append(track);
+    row.append(el('div', {class:'bar-val'}, d.score.toFixed(3)));
+    panel.append(row);
+  }
+  return panel;
+}
+
+function renderClusterTable(data) {
+  const panel = el('div', {class:'panel'});
+  panel.setAttribute('style', 'grid-column: 1 / -1;');
+  panel.append(el('h2', {}, 'Clusters (priority-ranked)'));
+  const table = el('table');
+  table.append(el('tr', {},
+    el('th',{},'Cluster'), el('th',{},'Method'), el('th',{},'Tests'),
+    el('th',{},'Priority'), el('th',{},'Review?'), el('th',{},'Critic')));
+  for (const c of data.clusters) {
+    const criticPill = c.criticAccepted
+      ? el('span', {class:'pill ok'}, 'accepted')
+      : el('span', {class:'pill bad'}, 'rejected');
+    const reviewPill = c.needsLlmReview
+      ? el('span', {class:'pill warn'}, 'needs LLM review')
+      : el('span', {class:'pill ok'}, 'auto');
+    const flagsEl = (c.criticFlags && c.criticFlags.length)
+      ? el('div', {class:'flags'}, c.criticFlags.join('; '))
+      : '';
+    table.append(el('tr', {},
+      el('td',{}, c.clusterId),
+      el('td',{}, el('span',{class:'pill method'}, c.method)),
+      el('td',{}, c.tests.join(', ')),
+      el('td',{}, (c.priorityScore ?? 0).toFixed(3)),
+      el('td',{}, reviewPill),
+      el('td',{}, criticPill, flagsEl),
+    ));
+  }
+  panel.append(table);
+  return panel;
+}
+
+function render() {
+  document.getElementById('subtitle').textContent =
+    `trace ${DATA.traceId} — ${DATA.totals.clusters} clusters, ${DATA.totals.drafts} drafts, ` +
+    `${DATA.totals.accepted} accepted / ${DATA.totals.rejected} rejected by critic`;
+  const main = document.getElementById('main');
+  main.append(renderKPIs(DATA));
+  main.append(renderStageTimeline(DATA));
+  main.append(renderMethodBreakdown(DATA));
+  main.append(renderCriticSummary(DATA));
+  main.append(renderPriorityDistribution(DATA));
+  main.append(renderClusterTable(DATA));
+}
+render();
+</script>
+</body>
+</html>

@@ -6,17 +6,78 @@ retargeting [AgentMesh](https://github.com/ArchanaChetan07/Cost-aware-agent-orch
 domain. See `Agentic_Verification_Triage_System_Proposal.md` for the full
 design doc.
 
-## Status: Phase 4 of 7 — in progress (isolated harness working; real bug reproduced; UVM gap identified)
+## Status: Phase 5 of 7 — Observability ✅ (against synthetic fixtures)
 
 | Phase | Status |
 |---|---|
 | 1. Domain onboarding | done (this repo) |
-| 2. Parsing layer | done — validated against real sim output, see below |
+| 2. Parsing layer | done — validated against real sim output too |
 | 3. AgentMesh retargeting | done — Clusterer, Drafter, Critic all implemented |
-| **4. Bug seeding & test harness** | **isolated per-test harness built and confirmed working against real hardware bugs; structured-log gap found — see below** |
-| 5. Observability integration | not started |
+| 4. Bug seeding & test harness | isolated per-test harness working; 1 real bug reproduced; UVM gap identified (needs OpenTitan for full validation) |
+| **5. Observability integration** | **done — traced pipeline + dashboard, against fixtures; wiring real Phase 4 data through it is next** |
 | 6. Evaluation & validation report | not started |
 | 7. Documentation & demo | not started |
+
+### Traced pipeline (`triage/pipeline.py`) + dashboard (`triage/dashboard.py`)
+
+Section 5.2 requires "every planner decision, cluster assignment, draft,
+and critic override becomes an OTel-shaped span, reusing AgentMesh's
+tracer" — `pipeline.py` wires Parsing → Clusterer → Drafter → Critic
+together and wraps every stage and every individual decision (each
+cluster assignment, each drafted bug entry, each critic verdict) in a
+span from the vendored AgentMesh's `Tracer`, **reused unmodified**, not
+reimplemented. `Mesh`/`AdaptiveRouter` aren't used here because none of
+these three agents call an LLM yet (see `drafter.py`'s docstring on the
+evidence-template vs. future LLM-generator split) — there's no model to
+route to, so there's nothing for the router to do. When an LLM-backed
+generator is added for `needs_llm_review` clusters, that step would go
+through `Mesh` and pick up routing spans the same way `orchestrator.py`'s
+planner/coder/critic steps do; nothing here would need to change.
+
+`test_pipeline_matches_standalone_agent_results` explicitly checks that
+running through the traced pipeline produces identical clusters/drafts/
+verdicts to calling the Phase 3 agents directly — tracing is purely
+observational, it doesn't change behavior.
+
+`dashboard.py` builds a self-contained HTML file (same "opens anywhere,
+no server" approach as the vendored submodule's own dashboard) from the
+real span data: pipeline stage timeline, Clusterer method breakdown
+(exact_key/similarity/singleton counts — directly showing how much
+clustering happened without any LLM call), Critic accept/reject counts
+and override rate, priority score distribution, and a full cluster table
+with drafted root cause, priority, and critic verdict per row. Generate
+it yourself:
+
+```bash
+python3 scripts/generate_dashboard.py my_dashboard.html
+```
+
+A real Prometheus/Grafana/OTel-Collector wiring (rather than this
+single-file HTML view) is the natural next step once real regressions are
+flowing at volume — the vendored submodule's existing
+`observability/prometheus.yml`/`otel-collector-config.yaml` should work
+unmodified, since span shape is already OTLP-compatible; not done yet
+because the fixture-scale data here doesn't yet justify running that
+stack.
+
+### Honest scope note
+
+This phase is validated against the **synthetic fixtures**, not the real
+PicoRV32 data from Phase 4 — `real_data/runs/*.log` was validated through
+`regression_parser.py` directly (see `test_real_data_integration.py`), but
+hasn't been run through the full traced Clusterer→Drafter→Critic→dashboard
+pipeline yet (that data has no structured log signal for the Clusterer to
+use, as Phase 4's README section explains, so it would exercise the
+pipeline's plumbing but not produce a meaningful cluster-purity result).
+
+### Next
+
+- Phase 6: evaluation methodology — this requires real seeded-bug ground
+  truth at the proposal's target scale (15–25 bugs), which in turn needs
+  the OpenTitan UVM environment identified as the real gap in Phase 4
+- Wire `real_data/runs/*.log` through the full pipeline+dashboard as a
+  smoke test of the plumbing, clearly labeled as "infra proof, not a
+  cluster-purity result" given the missing structured log signal
 
 ### Phase 4: real infra, real bug, real result
 
@@ -76,9 +137,7 @@ failure, real parser compatibility — all now demonstrated), but Section
 OpenTitan) where `UVM_ERROR`/hierarchy/message-ID structure genuinely
 exists in the logs for `log_signature.py` and the Clusterer to work with.
 
-### Next
-
-- Move to an OpenTitan UVM testbench for real `log_signature.py` /
+### Next (from Phase 4, still open)
   Clusterer validation — this is the step that actually exercises
   Sections 5.1/5.2 against real UVM-structured logs
   the same isolated-per-test lesson from this session likely applies
@@ -106,14 +165,18 @@ triage/
     clusterer.py                 # structured-similarity clustering + LLM-review flagging
     drafter.py                    # evidence-grounded bug list drafting
     critic.py                     # independent evidence verification against drafts
+  pipeline.py                    # traced end-to-end orchestration (reuses AgentMesh's Tracer)
+  dashboard.py                    # observability dashboard model + HTML builder
+  dashboard_template.html        # self-contained single-file dashboard UI
 tests/
   fixtures/                     # synthetic regression w/ 3 seeded bug clusters
-  test_*.py                     # 42 unit/integration tests, all passing
+  test_*.py                     # 56 unit/integration tests, all passing
 real_data/
   picorv32_patches/start_single.S  # per-test isolation patch for PicoRV32's harness
   runs/*.log                    # REAL Icarus Verilog simulation output (see Phase 4)
 scripts/
   run_single_picorv32_test.sh   # builds + simulates one PicoRV32 test in isolation
+  generate_dashboard.py          # produces a dashboard HTML from the fixture data
 vendor/agentmesh/                # git submodule: the real AgentMesh core (reused, not forked)
 ```
 
