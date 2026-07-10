@@ -71,7 +71,7 @@ def _root_cause_text(cluster: FailureCluster) -> str:
     return f"Repeated {id_part} raised from {where_part}, observed across {plural}."
 
 
-def _priority_score(cluster: FailureCluster, holes: list, code_cov: list) -> tuple[float, str]:
+def priority_score(cluster: FailureCluster, holes: list, code_cov: list) -> tuple[float, str]:
     """Priority derived from coverage-hole severity and cluster size
     (Section 5.2). Purely additive and fully explained in `rationale` so
     every score is traceable, not a black-box number."""
@@ -114,7 +114,7 @@ class EvidenceBasedDraftGenerator:
                         f"toggle={cc.toggle_pct}% fsm={cc.fsm_pct}%"),
             ))
 
-        score, rationale = _priority_score(cluster, holes, code_cov)
+        score, rationale = priority_score(cluster, holes, code_cov)
 
         return BugDraft(
             cluster_id=cluster.cluster_id,

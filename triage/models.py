@@ -111,6 +111,19 @@ class BugDraft:
 
 
 @dataclass
+class CriticVerdict:
+    """Critic Agent's independent review of one BugDraft (Section 5.2)."""
+    cluster_id: str
+    accepted: bool
+    flags: list[str] = field(default_factory=list)   # reasons for rejection/concern; empty if clean
+    checked_claims: int = 0                            # total claims checked, for reporting
+
+    @property
+    def rejected(self) -> bool:
+        return not self.accepted
+
+
+@dataclass
 class FailureSignature:
     """Compact feature representation of a failing test, built from its log.
 

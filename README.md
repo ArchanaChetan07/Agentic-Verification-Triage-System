@@ -6,13 +6,13 @@ retargeting [AgentMesh](https://github.com/ArchanaChetan07/Cost-aware-agent-orch
 domain. See `Agentic_Verification_Triage_System_Proposal.md` for the full
 design doc.
 
-## Status: Phase 3 of 7 — Clusterer + Drafter ✅ (Critic next)
+## Status: Phase 3 of 7 — Clusterer + Drafter + Critic ✅
 
 | Phase | Status |
 |---|---|
 | 1. Domain onboarding | done (this repo) |
 | 2. Parsing layer | done |
-| **3. AgentMesh retargeting** | **Clusterer + Drafter done; Critic next** |
+| **3. AgentMesh retargeting** | **done — Clusterer, Drafter, Critic all implemented** |
 | 4. Bug seeding & test harness (real OpenTitan/PicoRV32 regressions) | not started |
 | 5. Observability integration | not started |
 | 6. Evaluation & validation report | not started |
@@ -30,9 +30,10 @@ triage/
   agents/
     clusterer.py                 # structured-similarity clustering + LLM-review flagging
     drafter.py                    # evidence-grounded bug list drafting
+    critic.py                     # independent evidence verification against drafts
 tests/
   fixtures/                     # synthetic regression w/ 3 seeded bug clusters
-  test_*.py                     # 34 unit tests, all passing
+  test_*.py                     # 39 unit tests, all passing
 vendor/agentmesh/                # git submodule: the real AgentMesh core (reused, not forked)
 ```
 
@@ -138,17 +139,63 @@ A future `LLMDraftGenerator` would wrap `Mesh`/`AdaptiveRouter` (mirroring
 resolve `needs_llm_review` clusters the Clusterer couldn't merge on
 structure alone — not implemented yet.
 
-## Next (rest of Phase 3)
+### Critic Agent (`triage/agents/critic.py`)
 
-- Wire an actual LLM call through `Mesh`/`AdaptiveRouter` for
-  `needs_llm_review` clusters (semantic grouping fallback) and/or prose
-  polishing of drafts — the vendored submodule's simulated backend only
-  produces placeholder text (`VALID_STEP_OUTPUT`/`FLAWED_STEP_OUTPUT`), so
-  this needs either a real endpoint (`ModelSpec.endpoint`) or an
-  API-key-backed generator, following the `BackendGenerator` pattern
-- Add `"triage"` to `ROLE_SEQUENCES` in a config layer on top of the
-  AgentMesh submodule (not editing it directly), so clusterer/drafter/critic
-  steps get traced the same way planner/coder/critic are today
-- Implement Critic Agent: flags drafted entries unsupported by the
-  underlying evidence; measure both false positives caught and new false
-  negatives introduced (per the proposal's risk mitigation)
+Independently reviews each `BugDraft` against the underlying evidence —
+deliberately by **re-deriving ground truth from the cluster/coverage data
+itself**, not by re-reading the Drafter's own evidence list. A critic that
+only checks internal consistency of what the Drafter already wrote can't
+catch a drafter that fabricated its evidence wholesale; this one
+re-parses each evidence citation and checks it against the actual
+`FailureSignature.events`, `CoverageReport.coverage_holes()`, and
+`CoverageReport.code_coverage`, independently recomputes the priority
+score, and scans the free-text root-cause line for identifiers that don't
+actually appear anywhere in the cluster.
+
+Per the risk table ("Critic agent becomes a rubber stamp"), effectiveness
+is measured on **both axes**, not just catch rate:
+
+- `test_all_real_drafts_accepted_cleanly` / the false-negative half of
+  `test_critic_effectiveness_on_mutation_set` — honest, evidence-grounded
+  drafts must pass clean (0% false-negative rate)
+- the false-positive-catch half of the same test — 7 distinct injected
+  flaws (fabricated coverage hole, fabricated log event, fabricated code
+  coverage module, claiming an unrelated test, omitting a real test,
+  inflating the priority score, hallucinating an identifier in the root
+  cause) applied to every real draft, all must be caught (100% catch rate
+  on this labeled mutation set — a small-scale rehearsal of the Section 7
+  methodology's critic-effectiveness measurement, same "measure both
+  directions" discipline, smaller N)
+
+On the real (non-mutated) fixture drafts the Critic accepts all 4 cleanly,
+since `EvidenceBasedDraftGenerator` is evidence-grounded by construction —
+which is itself informative: the interesting test is the mutation set,
+not the pass-through case.
+
+## Next: Phase 4 — Bug seeding & real test harness
+
+Phases 1–3 are now complete against synthetic fixtures. The honest next
+step per the proposal (Section 7, "no claim will be published without a
+reproducible script") is to stop validating against hand-written fixtures
+and start validating against a **real** UVM regression:
+
+- Pick one open-source design to start — PicoRV32 (small, easy to seed
+  controlled bugs in) rather than OpenTitan initially (larger surface,
+  save for later)
+- Seed a first batch of real bugs, run real regressions via
+  Verilator/Icarus, capture real regression summaries/coverage/logs
+- Adapt `regression_parser.py`/`coverage_parser.py`/`log_signature.py` to
+  whatever the real tool output actually looks like — this is where the
+  "≥95% parse rate" objective gets tested against reality instead of a
+  synthetic fixture built to match the parser
+- Once real signatures/coverage flow through, re-run the same
+  Clusterer → Drafter → Critic pipeline unchanged and see where cluster
+  purity actually lands against real seeded-bug ground truth
+
+Separately (can happen in parallel): wire an actual LLM call through
+`Mesh`/`AdaptiveRouter` for `needs_llm_review` clusters and add `"triage"`
+to `ROLE_SEQUENCES` so every step gets traced the same way
+planner/coder/critic are today — deferred because it needs either a real
+model endpoint or an API-key-backed generator (the vendored submodule's
+simulated backend only produces placeholder text), and is lower-value
+than getting real regression data flowing first.
