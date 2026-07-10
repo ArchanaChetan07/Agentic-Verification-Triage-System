@@ -7,8 +7,8 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "regression_summar
 
 def test_parses_all_valid_lines():
     result = parse_regression_summary_file(FIXTURE)
-    # 9 valid TEST lines, 1 garbage line
-    assert len(result.results) == 9
+    # 10 valid TEST lines, 1 garbage line
+    assert len(result.results) == 10
     assert len(result.errors) == 1
     assert "GARBAGE LINE" in result.errors[0]
 
@@ -25,7 +25,7 @@ def test_failure_filtering():
     assert failure_names == {
         "uvm_test_alu_overflow", "uvm_test_alu_overflow_neg",
         "uvm_test_fifo_full_write", "uvm_test_fifo_almost_full",
-        "uvm_test_apb_reset", "uvm_test_apb_reset_seed2",
+        "uvm_test_apb_reset", "uvm_test_apb_reset_seed2", "uvm_test_apb_addr_decode",
     }
 
 

@@ -9,3 +9,4 @@ TEST: uvm_test_apb_reset           SEED: 10007  STATUS: FAILED  TIME: 1.8s
 TEST: uvm_test_apb_basic           SEED: 10008  STATUS: PASSED  TIME: 2.4s
 GARBAGE LINE THAT DOES NOT PARSE
 TEST: uvm_test_apb_reset_seed2     SEED: 10009  STATUS: FAILED  TIME: 1.9s
+TEST: uvm_test_apb_addr_decode     SEED: 10010  STATUS: FAILED  TIME: 2.1s

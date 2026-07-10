@@ -1,0 +1,2 @@
+UVM_INFO testbench.sv(10) @ 0: reporter [TB] Starting test uvm_test_apb_addr_decode
+UVM_ERROR apb_scoreboard.sv(75) @ 600: uvm_test_top.env.apb_agent.monitor [APB_ADDR_DECODE_ERROR] Write routed to wrong slave register
