@@ -8,7 +8,9 @@ Built by retargeting [AgentMesh](https://github.com/ArchanaChetan07/Cost-aware-a
 multi-agent orchestration engine (planner → agent roles → critic, adaptive routing, full OTel tracing) — at a new
 domain: chip verification.
 
+[![CI](https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System/actions/workflows/ci.yml/badge.svg)](https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-57%20passing-4fd39a)](#getting-started)
+[![Lint](https://img.shields.io/badge/lint-ruff%20clean-4fd39a)](#getting-started)
 [![Phase](https://img.shields.io/badge/phase-5%20of%207-5aa9ff)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-8b93a1)](LICENSE)
 
@@ -383,9 +385,14 @@ cd Agentic-Verification-Triage-System
 pip install -e ".[dev]"
 pip install -e vendor/agentmesh
 
-pytest -q                                   # 57 tests, ~0.26s
+pytest -q                                        # 57 tests, ~0.2s
+ruff check triage/ tests/ scripts/*.py           # zero warnings
 python3 scripts/generate_dashboard.py out.html   # generate the observability dashboard
+python3 scripts/run_real_data_pipeline.py real.html   # run against real PicoRV32 simulation data
 ```
+
+Every push and pull request runs this same sequence (lint + full test suite + both dashboard scripts, across
+Python 3.10/3.11/3.12) via [GitHub Actions](.github/workflows/ci.yml) — see the CI badge above.
 
 ## Component deep-dives
 

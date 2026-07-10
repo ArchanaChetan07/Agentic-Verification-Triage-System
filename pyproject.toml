@@ -2,14 +2,36 @@
 name = "verification-triage"
 version = "0.1.0"
 description = "Agentic Verification Triage System — UVM/SystemVerilog coverage triage and bug prioritization, built on AgentMesh."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Archana Chetan" }]
 requires-python = ">=3.10"
 dependencies = []
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Repository = "https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
 
 [build-system]
 requires = ["setuptools>=68"]

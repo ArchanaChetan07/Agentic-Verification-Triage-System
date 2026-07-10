@@ -18,7 +18,6 @@ overzealous critic can't inflate its own score either direction.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 
 from ..agents.clusterer import FailureCluster
 from ..agents.drafter import priority_score, related_code_coverage, related_coverage_holes

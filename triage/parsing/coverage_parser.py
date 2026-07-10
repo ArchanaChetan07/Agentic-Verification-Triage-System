@@ -44,7 +44,6 @@ def parse_coverage_report(text: str) -> CoverageReport:
     current_cg: Covergroup | None = None
     current_cp: Coverpoint | None = None
     current_cc: CodeCoverage | None = None
-    mode = None  # "coverpoint" | "cross"
 
     for raw in text.splitlines():
         line = raw.strip()
@@ -54,13 +53,13 @@ def parse_coverage_report(text: str) -> CoverageReport:
         if m := _COVERGROUP_RE.match(line):
             current_cg = Covergroup(name=m.group(1))
             report.covergroups.append(current_cg)
-            current_cp, current_cc, mode = None, None, None
+            current_cp, current_cc = None, None
             continue
 
         if m := _CODE_COV_RE.match(line):
             current_cc = CodeCoverage(module=m.group(1))
             report.code_coverage.append(current_cc)
-            current_cg, current_cp, mode = None, None, None
+            current_cg, current_cp = None, None
             continue
 
         if current_cc is not None:
@@ -76,12 +75,10 @@ def parse_coverage_report(text: str) -> CoverageReport:
             if m := _COVERPOINT_RE.match(line):
                 current_cp = Coverpoint(name=m.group(1))
                 current_cg.coverpoints.append(current_cp)
-                mode = "coverpoint"
                 continue
             if m := _CROSS_RE.match(line):
                 current_cp = Coverpoint(name=m.group(1))
                 current_cg.crosses.append(current_cp)
-                mode = "cross"
                 continue
             if current_cp is not None and (m := _BIN_RE.match(line)):
                 current_cp.bins.append(CoverageBin(name=m.group(1), hits=int(m.group(2))))

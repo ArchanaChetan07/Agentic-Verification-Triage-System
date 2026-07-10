@@ -26,7 +26,7 @@ if str(_VENDOR) not in sys.path:
 
 from agentmesh.telemetry import Tracer  # noqa: E402
 
-from .pipeline import TriageRunResult
+from .pipeline import TriageRunResult  # noqa: E402
 
 
 def build_model(result: TriageRunResult, tracer: Tracer) -> dict:
