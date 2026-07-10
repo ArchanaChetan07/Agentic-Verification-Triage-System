@@ -1,0 +1,2 @@
+UVM_INFO testbench.sv(10) @ 0: reporter [TB] Starting test uvm_test_fifo_almost_full
+UVM_ERROR fifo_scoreboard.sv(88) @ 4800: uvm_test_top.env.fifo_agent.monitor [FIFO_OVERFLOW_UNPROTECTED] Write accepted while fifo full, data corrupted

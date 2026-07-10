@@ -1,0 +1,4 @@
+# sim log excerpt
+UVM_INFO testbench.sv(10) @ 0: reporter [TB] Starting test uvm_test_alu_overflow
+UVM_ERROR alu_scoreboard.sv(142) @ 4200: uvm_test_top.env.scoreboard [SCOREBOARD_MISMATCH] Expected 0x00000010 but got 0xFFFFFFF0 on overflow add
+UVM_ERROR alu_scoreboard.sv(150) @ 4400: uvm_test_top.env.scoreboard [SCOREBOARD_MISMATCH] Expected carry flag 1 but got 0

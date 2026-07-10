@@ -1,0 +1,3 @@
+[submodule "vendor/agentmesh"]
+	path = vendor/agentmesh
+	url = https://github.com/ArchanaChetan07/Cost-aware-agent-orchestration.git

@@ -1,0 +1,2 @@
+UVM_INFO testbench.sv(10) @ 0: reporter [TB] Starting test uvm_test_alu_overflow_neg
+UVM_ERROR alu_scoreboard.sv(142) @ 3900: uvm_test_top.env.scoreboard [SCOREBOARD_MISMATCH] Expected 0x00000010 but got 0xFFFFFFF0 on overflow sub

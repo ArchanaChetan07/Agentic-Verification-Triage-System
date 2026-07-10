@@ -1,0 +1,39 @@
+COVERGROUP alu_cg
+  COVERPOINT op_type
+    BIN add HITS 120
+    BIN sub HITS 88
+    BIN overflow_add HITS 0
+    BIN overflow_sub HITS 0
+  CROSS op_type_x_operand_sign
+    BIN add_pos_pos HITS 45
+    BIN add_neg_neg HITS 0
+
+COVERGROUP fifo_cg
+  COVERPOINT fill_level
+    BIN empty HITS 200
+    BIN half HITS 150
+    BIN full HITS 0
+    BIN almost_full HITS 3
+
+COVERGROUP apb_cg
+  COVERPOINT reset_state
+    BIN reset_during_write HITS 0
+    BIN reset_idle HITS 300
+
+CODE_COVERAGE MODULE alu_unit
+  LINE 87.5
+  BRANCH 72.1
+  TOGGLE 65.0
+  FSM 90.0
+
+CODE_COVERAGE MODULE fifo_unit
+  LINE 91.0
+  BRANCH 80.4
+  TOGGLE 70.2
+  FSM 95.0
+
+CODE_COVERAGE MODULE apb_slave
+  LINE 76.3
+  BRANCH 60.0
+  TOGGLE 55.5
+  FSM 82.0
