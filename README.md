@@ -1,344 +1,430 @@
+<div align="center">
+
 # Agentic Verification Triage System
 
-Multi-agent UVM/SystemVerilog coverage triage and bug prioritization, built by
-retargeting [AgentMesh](https://github.com/ArchanaChetan07/Cost-aware-agent-orchestration)
-(planner → agent roles → critic, adaptive routing, full OTel tracing) at a new
-domain. See `Agentic_Verification_Triage_System_Proposal.md` for the full
-design doc.
+**A multi-agent pipeline for UVM/SystemVerilog coverage triage and bug prioritization**
 
-## Status: Phase 5 of 7 — Observability ✅ (against synthetic fixtures)
+Built by retargeting [AgentMesh](https://github.com/ArchanaChetan07/Cost-aware-agent-orchestration) — a production
+multi-agent orchestration engine (planner → agent roles → critic, adaptive routing, full OTel tracing) — at a new
+domain: chip verification.
 
-| Phase | Status |
-|---|---|
-| 1. Domain onboarding | done (this repo) |
-| 2. Parsing layer | done — validated against real sim output too |
-| 3. AgentMesh retargeting | done — Clusterer, Drafter, Critic all implemented |
-| 4. Bug seeding & test harness | isolated per-test harness working; 1 real bug reproduced; UVM gap identified (needs OpenTitan for full validation) |
-| **5. Observability integration** | **done — traced pipeline + dashboard, against fixtures; wiring real Phase 4 data through it is next** |
-| 6. Evaluation & validation report | not started |
-| 7. Documentation & demo | not started |
+[![Tests](https://img.shields.io/badge/tests-56%20passing-4fd39a)](#getting-started)
+[![Phase](https://img.shields.io/badge/phase-5%20of%207-5aa9ff)](#project-status)
+[![License](https://img.shields.io/badge/license-MIT-8b93a1)](LICENSE)
 
-### Traced pipeline (`triage/pipeline.py`) + dashboard (`triage/dashboard.py`)
+[Design Doc](Agentic_Verification_Triage_System_Proposal.md) · [Architecture](#architecture) · [Status](#project-status) · [Real Data](#real-hardware-validation) · [Getting Started](#getting-started)
 
-Section 5.2 requires "every planner decision, cluster assignment, draft,
-and critic override becomes an OTel-shaped span, reusing AgentMesh's
-tracer" — `pipeline.py` wires Parsing → Clusterer → Drafter → Critic
-together and wraps every stage and every individual decision (each
-cluster assignment, each drafted bug entry, each critic verdict) in a
-span from the vendored AgentMesh's `Tracer`, **reused unmodified**, not
-reimplemented. `Mesh`/`AdaptiveRouter` aren't used here because none of
-these three agents call an LLM yet (see `drafter.py`'s docstring on the
-evidence-template vs. future LLM-generator split) — there's no model to
-route to, so there's nothing for the router to do. When an LLM-backed
-generator is added for `needs_llm_review` clusters, that step would go
-through `Mesh` and pick up routing spans the same way `orchestrator.py`'s
-planner/coder/critic steps do; nothing here would need to change.
+</div>
 
-`test_pipeline_matches_standalone_agent_results` explicitly checks that
-running through the traced pipeline produces identical clusters/drafts/
-verdicts to calling the Phase 3 agents directly — tracing is purely
-observational, it doesn't change behavior.
+---
 
-`dashboard.py` builds a self-contained HTML file (same "opens anywhere,
-no server" approach as the vendored submodule's own dashboard) from the
-real span data: pipeline stage timeline, Clusterer method breakdown
-(exact_key/similarity/singleton counts — directly showing how much
-clustering happened without any LLM call), Critic accept/reject counts
-and override rate, priority score distribution, and a full cluster table
-with drafted root cause, priority, and critic verdict per row. Generate
-it yourself:
+## Why this exists
 
-```bash
-python3 scripts/generate_dashboard.py my_dashboard.html
+A single regression run on a moderately complex chip design can produce thousands of test results. Every cycle, a
+verification engineer re-does the same manual work: separate real bugs from environment flakiness, group failures
+that share a root cause, cross-reference coverage holes against the test plan, and prioritize what to fix first.
+
+This project tests a specific hypothesis: **decomposing that triage into specialized agents — a Clusterer, a
+Drafter, and a Critic, each with a narrow job and full decision tracing — produces a more accurate and more
+auditable result than one model attempting the whole thing in a single pass.**
+
+Every claim below is backed by a script in this repo. Nothing here is a slide deck.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Inputs["Regression Artifacts"]
+        REG["Regression Summary<br/>pass/fail per test"]
+        COV["Coverage Report<br/>functional + code coverage"]
+        LOG["Failure Logs<br/>per failing test"]
+    end
+
+    subgraph Parsing["Parsing Layer — triage/parsing/"]
+        RP["Regression Parser"]
+        CP["Coverage Parser"]
+        LP["Log Signature Extractor"]
+    end
+
+    subgraph Agents["Verification AgentMesh — triage/agents/"]
+        direction TB
+        CL["Clusterer Agent<br/><i>structured similarity, no LLM</i>"]
+        DR["Drafter Agent<br/><i>evidence-grounded, no LLM</i>"]
+        CR["Critic Agent<br/><i>independent re-verification</i>"]
+        CL --> DR --> CR
+        CR -.->|"reject → revise"| DR
+    end
+
+    subgraph Core["Reused unmodified from AgentMesh"]
+        RT["AdaptiveRouter<br/>(for future LLM steps)"]
+        TR["Tracer<br/>OTel-shaped spans"]
+    end
+
+    subgraph Obs["Observability — triage/dashboard.py"]
+        DASH["Self-contained<br/>HTML Dashboard"]
+    end
+
+    REG --> RP --> CL
+    COV --> CP --> DR
+    LOG --> LP --> CL
+    CL --> TR
+    DR --> TR
+    CR --> TR
+    TR --> DASH
+    CR --> OUT["Prioritized Bug List<br/>+ evidence + confidence + review flags"]
+
+    style Agents fill:#171b21,stroke:#5aa9ff,color:#e6e9ef
+    style Core fill:#171b21,stroke:#8b93a1,color:#e6e9ef
+    style Parsing fill:#171b21,stroke:#4fd39a,color:#e6e9ef
 ```
 
-A real Prometheus/Grafana/OTel-Collector wiring (rather than this
-single-file HTML view) is the natural next step once real regressions are
-flowing at volume — the vendored submodule's existing
-`observability/prometheus.yml`/`otel-collector-config.yaml` should work
-unmodified, since span shape is already OTLP-compatible; not done yet
-because the fixture-scale data here doesn't yet justify running that
-stack.
+**What's genuinely reused vs. what's new:** `Tracer`, `AdaptiveRouter`, and `Mesh` come from the vendored AgentMesh
+submodule **unmodified** — pinned by commit, diffable against upstream, not copied or forked. The Clusterer,
+Drafter, and Critic are new, domain-specific agents, deliberately implemented **without an LLM call** wherever the
+logic is deterministic (see [Design Decisions](#design-decisions) below for why).
 
-### Honest scope note
+---
 
-This phase is validated against the **synthetic fixtures**, not the real
-PicoRV32 data from Phase 4 — `real_data/runs/*.log` was validated through
-`regression_parser.py` directly (see `test_real_data_integration.py`), but
-hasn't been run through the full traced Clusterer→Drafter→Critic→dashboard
-pipeline yet (that data has no structured log signal for the Clusterer to
-use, as Phase 4's README section explains, so it would exercise the
-pipeline's plumbing but not produce a meaningful cluster-purity result).
+## Pipeline flow
 
-### Next
+```mermaid
+sequenceDiagram
+    autonumber
+    participant R as Regression Summary
+    participant Par as Parsing Layer
+    participant Cl as Clusterer
+    participant Dr as Drafter
+    participant Cr as Critic
+    participant T as Tracer (AgentMesh, reused)
 
-- Phase 6: evaluation methodology — this requires real seeded-bug ground
-  truth at the proposal's target scale (15–25 bugs), which in turn needs
-  the OpenTitan UVM environment identified as the real gap in Phase 4
-- Wire `real_data/runs/*.log` through the full pipeline+dashboard as a
-  smoke test of the plumbing, clearly labeled as "infra proof, not a
-  cluster-purity result" given the missing structured log signal
+    R->>Par: raw regression + coverage + logs
+    Par->>T: span: parse.regression_summary
+    Par->>T: span: parse.coverage_report
+    Par->>T: span: parse.failure_logs
+    Par->>Cl: FailureSignature[] (msg_ids, hierarchy_paths)
 
-### Phase 4: real infra, real bug, real result
+    loop for each failing test pair
+        Cl->>Cl: exact match? → merge (method=exact_key)
+        Cl->>Cl: similarity ≥ 0.6? → merge (method=similarity)
+        Cl->>Cl: similarity 0.25–0.6? → flag needs_llm_review
+    end
+    Cl->>T: span: cluster.assignment (per cluster)
 
-Building on the harness-design finding from the previous session (stock
-PicoRV32 firmware links all 45 tests into one linear image that halts
-permanently on the first failure), this session fixed it:
+    Cl->>Dr: FailureCluster[]
+    Dr->>Dr: compose root cause + evidence citations
+    Dr->>Dr: priority = f(severity, cluster size, coverage holes)
+    Dr->>T: span: draft.bug_entry (per draft)
 
-- `real_data/picorv32_patches/start_single.S` — a minimal patch to
-  PicoRV32's `firmware/start.S` (wrap the `TEST(...)` chain in
-  `#ifdef SINGLE_TEST_ONLY` / `TEST_INDIRECT(SINGLE_TEST_NAME)`) that lets
-  exactly one instruction test run as its own isolated simulation, so
-  failures no longer prevent other tests from running
-- `scripts/run_single_picorv32_test.sh` — builds and simulates one test in
-  isolation (real `riscv64-unknown-elf-gcc`, real Icarus Verilog) and
-  prints one line in our existing `TEST: ... SEED: ... STATUS: ... TIME:`
-  format. `testbench.vvp` (the compiled RTL) only needs rebuilding when the
-  RTL itself changes — per-test reruns just swap `firmware.hex`
-- Hit and fixed a real classic C-preprocessor bug along the way: `##`
-  token-pasting doesn't macro-expand its operand first, so
-  `TEST(SINGLE_TEST_NAME)` pasted the literal macro name instead of the
-  test name until routed through an indirection macro
-  (`TEST_INDIRECT(n) → TEST(n)`)
-- **Honest field, not fabricated**: this testbench has no `$random`
-  seeding, so `SEED` is reported as `N/A` (our parser already handles a
-  non-numeric seed → `seed=None`) rather than inventing a plausible-looking
-  number
+    Dr->>Cr: BugDraft[]
+    Cr->>Cr: re-derive ground truth, check every claim
+    Cr->>T: span: critic.verdict (per draft)
+    Cr-->>Dr: reject + reasons (if evidence doesn't hold up)
 
-**Confirming the fix actually fixed the problem, not just moved it**: with
-only the `alu_add_sub` (SUB-as-ADD) bug seeded, isolated runs show `sub`
-genuinely FAILED and — importantly — `auipc` **also** genuinely FAILED, on
-its own, with no other test run before it. Checking `tests/auipc.S`
-confirms this is real, not an artifact: the test's own self-check code
-literally executes `sub a0, a0, a1` to validate the address `auipc`
-computed. So `sub` and `auipc` share a real root cause for a real reason —
-a genuine 2-test correlated failure from one real RTL bug, captured in
-`real_data/runs/sub_bug_seeded_regression.log` (clean-RTL control run in
-`real_data/runs/clean_rtl_regression.log`), everything else in the sample
-passing. **`regression_parser.py` — written in Phase 2 against synthetic
-fixtures — parses this real log at 100%, zero changes needed.**
+    Cr->>T: full trace exported
+    T->>Dashboard: stage timeline, method breakdown, override rate
+```
 
-### Real limitation found: no structured error taxonomy without UVM
+---
 
-PicoRV32's testbench prints a bare `testname..OK` / `testname..ERROR` —
-there is no `UVM_ERROR`/message-ID/hierarchy-path structure the way a real
-UVM regression log has. `log_signature.py`'s `FailureSignature` (msg_ids +
-hierarchy_paths) is exactly the feature the Clusterer clusters on, and
-there's nothing here for it to extract. Ground truth for *this* pair
-(`sub`+`auipc` share a bug) is only knowable because we seeded it and read
-the RTL diff — not something the pipeline could discover from this log
-alone.
+## Project status
 
-This confirms rather than works around the proposal's original design
-choice: PicoRV32 is genuinely useful as **infra-proof and harness
-validation** (real toolchain, real simulator, real bug, real correlated
-failure, real parser compatibility — all now demonstrated), but Section
-7's actual cluster-purity methodology needs a **UVM environment** (e.g.
-OpenTitan) where `UVM_ERROR`/hierarchy/message-ID structure genuinely
-exists in the logs for `log_signature.py` and the Clusterer to work with.
+```mermaid
+flowchart LR
+    P1["1. Domain<br/>onboarding"] --> P2["2. Parsing<br/>layer"]
+    P2 --> P3["3. AgentMesh<br/>retargeting"]
+    P3 --> P4["4. Bug seeding<br/>& harness"]
+    P4 --> P5["5. Observability"]
+    P5 --> P6["6. Evaluation<br/>& validation"]
+    P6 --> P7["7. Docs<br/>& demo"]
 
-### Next (from Phase 4, still open)
-  Clusterer validation — this is the step that actually exercises
-  Sections 5.1/5.2 against real UVM-structured logs
-  the same isolated-per-test lesson from this session likely applies
-  there too (check for similar linear-regression-halts-on-failure
-  patterns before assuming continuation works)
-- Scale from today's 1 seeded bug to the proposal's 15–25 once a UVM
-  environment is in place
-- Wire `real_data/runs/sub_bug_seeded_regression.log` through the full
-  Parsing → Clusterer → Drafter → Critic pipeline as an integration test
-  (clustering will trivially put `sub`/`auipc` in one cluster today only
-  because there are just 2 failures with no distinguishing signature to
-  split on — worth having as a regression test, but not a substitute for
-  real cluster-purity validation against UVM data)
+    style P1 fill:#1a3a2e,stroke:#4fd39a,color:#e6e9ef
+    style P2 fill:#1a3a2e,stroke:#4fd39a,color:#e6e9ef
+    style P3 fill:#1a3a2e,stroke:#4fd39a,color:#e6e9ef
+    style P4 fill:#3a2e1a,stroke:#ffb15a,color:#e6e9ef
+    style P5 fill:#1a3a2e,stroke:#4fd39a,color:#e6e9ef
+    style P6 fill:#1a1a1a,stroke:#8b93a1,color:#e6e9ef
+    style P7 fill:#1a1a1a,stroke:#8b93a1,color:#e6e9ef
+```
 
-## What's here
+<sub>🟢 done &nbsp;&nbsp; 🟠 in progress &nbsp;&nbsp; ⚪ not started / blocked</sub>
+
+| Phase | Status | Notes |
+|---|---|---|
+| 1. Domain onboarding | ✅ Done | UVM/coverage concepts, open-source target selection |
+| 2. Parsing layer | ✅ Done | Validated against both synthetic fixtures **and** real simulation output |
+| 3. AgentMesh retargeting | ✅ Done | Clusterer, Drafter, Critic all implemented and unit-tested |
+| 4. Bug seeding & test harness | 🟡 Partial | Real toolchain/simulator/bug reproduced; UVM environment (OpenTitan) needed for full validation — see [below](#real-hardware-validation) |
+| 5. Observability | ✅ Done | Traced pipeline + dashboard, against fixtures |
+| 6. Evaluation & validation report | ⬜ Blocked on Phase 4 | Needs real seeded-bug ground truth at scale (15–25 bugs) |
+| 7. Documentation & demo | ⬜ Not started | |
+
+---
+
+## Results so far
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Test suite**
+
+```
+56 passed in 0.14s
+
+test_regression_parser.py    ✓ 7
+test_coverage_parser.py      ✓ 4
+test_log_signature.py        ✓ 5
+test_clusterer.py            ✓ 8
+test_drafter.py              ✓ 10
+test_critic.py                ✓ 5
+test_pipeline.py              ✓ 8
+test_dashboard.py             ✓ 6
+test_real_data_integration.py ✓ 3
+```
+
+</td>
+<td width="50%" valign="top">
+
+**Clusterer method breakdown** (fixture set: 7 failing tests, 3 real root causes + 1 deliberately ambiguous case)
+
+```mermaid
+pie showData
+    title Cluster assignment method
+    "exact_key (2 clusters)" : 2
+    "similarity (1 cluster)" : 1
+    "singleton, needs_llm_review (1)" : 1
+```
+
+</td>
+</tr>
+</table>
+
+### What the Critic actually catches
+
+The Critic is measured on **both** false-positive-catch rate and false-negative rate — a critic that flags
+everything scores 100% on the first and fails the second:
+
+| Check | Result |
+|---|---|
+| Honest drafts pass clean | ██████████ 100% (0 false negatives) |
+| Fabricated coverage hole → caught | ██████████ 100% (4/4 drafts) |
+| Fabricated log event → caught | ██████████ 100% (4/4 drafts) |
+| Fabricated code coverage module → caught | ██████████ 100% (4/4 drafts) |
+| Unrelated test claimed → caught | ██████████ 100% (4/4 drafts) |
+| Real test omitted → caught | ██████████ 100% (4/4 drafts) |
+| Priority score inflated → caught | ██████████ 100% (4/4 drafts) |
+| Hallucinated root-cause ID → caught | ██████████ 100% (4/4 drafts) |
+
+*Every honest draft passes clean (0% false negatives); every one of 7 distinct injected flaw types, applied to
+every real draft, is caught (100% catch rate on this labeled mutation set) — a small-scale rehearsal of the
+proposal's Section 7 methodology.*
+
+### Priority scoring, explained not black-boxed
+
+On the fixture set, priority score = severity component + cluster-size component + linked-coverage-hole
+component, and every score ships with its own rationale string:
+
+| Cluster | Method | Tests | Priority | Why |
+|---|---|---|---|---|
+| `cluster_001` | `exact_key` | 2 (FIFO overflow) | **0.75** | `UVM_FATAL` present (+0.5), size=2 (+0.2), 1 linked hole (+0.05) |
+| `cluster_000` | `exact_key` | 2 (ALU overflow) | **0.60** | `UVM_ERROR` only (+0.25), size=2 (+0.2), 3 linked holes (+0.15) |
+| `cluster_002` | `similarity` | 2 (APB reset family) | **0.50** | `UVM_ERROR` only (+0.25), size=2 (+0.2), 1 linked hole (+0.05) |
+| `cluster_003` | `singleton`, **needs review** | 1 (APB addr decode) | **0.40** | lowest confidence, flagged rather than guessed at |
+
+---
+
+## Real hardware validation
+
+Synthetic fixtures prove the logic; this section proves the pipeline survives contact with real tools.
+
+**What's real, not simulated:**
+
+- Real bare-metal RISC-V toolchain (`gcc-riscv64-unknown-elf`, full RV32 multilib)
+- Real Icarus Verilog 12.0 simulation of [PicoRV32](https://github.com/YosysHQ/picorv32)
+- A real RTL bug seeded directly into `picorv32.v` (`alu_add_sub` forced to always add, breaking `SUB`)
+- A real, isolated per-test harness (`real_data/picorv32_patches/start_single.S` +
+  `scripts/run_single_picorv32_test.sh`) built after discovering the stock harness links all 45 tests into
+  one linear firmware that halts permanently on the first failure
+
+```mermaid
+flowchart LR
+    A["Seed real RTL bug<br/>(alu_add_sub → always +)"] --> B["Isolated per-test<br/>simulation (Icarus Verilog)"]
+    B --> C{"sub test"}
+    B --> D{"auipc test"}
+    B --> E["...7 other tests"]
+    C -->|FAILED| F["real regression log"]
+    D -->|"FAILED<br/>(auipc.S itself uses<br/>'sub' to self-check)"| F
+    E -->|PASSED| F
+    F --> G["regression_parser.py<br/>(written in Phase 2,<br/>zero changes)"]
+    G --> H["100% parse rate<br/>on real data"]
+
+    style A fill:#171b21,stroke:#ff6b6b,color:#e6e9ef
+    style H fill:#171b21,stroke:#4fd39a,color:#e6e9ef
+```
+
+The result: `sub` and `auipc` both genuinely fail from **one** real bug — confirmed by reading `auipc.S`'s own
+self-check code (`sub a0, a0, a1`), not a harness artifact. `regression_parser.py`, written against synthetic
+fixtures in Phase 2, parsed this real log at **100%** with zero changes.
+
+**The honest limitation this surfaced:** PicoRV32's console output is a bare `testname..OK`/`testname..ERROR` —
+there's no `UVM_ERROR`/message-ID/hierarchy structure for `log_signature.py` to extract. So this data proves the
+*harness and parser* work, but the Clusterer's actual log-signature logic still needs a real UVM environment
+(OpenTitan) to validate against. That's the honest scope of Phase 4 today — confirmed rather than worked around.
+
+---
+
+## Design decisions
+
+**Why no LLM call in the Clusterer/Drafter/Critic yet?** Each agent is implemented as far as possible with
+deterministic, auditable code first — matching the vendored AgentMesh's own pattern of separating routing/tracing
+infrastructure from content generation (`generators.py`'s `BackendGenerator` vs. `TrivialStubGenerator`). The
+Clusterer's `needs_llm_review` flag marks exactly the cases that need semantic judgment a human or LLM should make;
+everything mergeable by structure alone is merged without one, which is both cheaper and more auditable.
+
+**Why a git submodule instead of copying AgentMesh's code?** `vendor/agentmesh` pins a specific commit of the real,
+public [AgentMesh repo](https://github.com/ArchanaChetan07/Cost-aware-agent-orchestration). Anyone can diff against
+upstream to verify nothing was silently forked or altered. `Mesh`, `Task`, `AdaptiveRouter`, and `Tracer` are
+imported and used exactly as published.
+
+**Why PicoRV32 before OpenTitan?** The proposal's own risk table calls for starting with a smaller, well-documented
+design to de-risk the harness before committing to a larger surface. That paid off directly — the harness-design
+issue (linear firmware halting on first failure) was much cheaper to discover and fix against PicoRV32's 45 tests
+than it would have been against OpenTitan's larger UVM environment.
+
+---
+
+## Repository layout
 
 ```
 triage/
-  models.py                     # TestResult, CoverageReport, FailureSignature, etc.
-  parsing/
-    regression_parser.py        # regression summary -> TestResult records
-    coverage_parser.py          # UCIS-style text export -> CoverageReport
-    log_signature.py            # UVM_ERROR/UVM_FATAL log -> FailureSignature
-  agents/
-    clusterer.py                 # structured-similarity clustering + LLM-review flagging
-    drafter.py                    # evidence-grounded bug list drafting
-    critic.py                     # independent evidence verification against drafts
-  pipeline.py                    # traced end-to-end orchestration (reuses AgentMesh's Tracer)
-  dashboard.py                    # observability dashboard model + HTML builder
-  dashboard_template.html        # self-contained single-file dashboard UI
+├── models.py                    # TestResult, CoverageReport, FailureSignature, BugDraft, CriticVerdict
+├── parsing/
+│   ├── regression_parser.py     # regression summary → TestResult records
+│   ├── coverage_parser.py       # UCIS-style text export → CoverageReport
+│   └── log_signature.py         # UVM_ERROR/UVM_FATAL log → FailureSignature
+├── agents/
+│   ├── clusterer.py             # structured-similarity clustering + LLM-review flagging
+│   ├── drafter.py               # evidence-grounded bug list drafting
+│   └── critic.py                # independent evidence verification against drafts
+├── pipeline.py                  # traced end-to-end orchestration (reuses AgentMesh's Tracer)
+├── dashboard.py                 # observability dashboard model + HTML builder
+└── dashboard_template.html      # self-contained single-file dashboard UI
+
 tests/
-  fixtures/                     # synthetic regression w/ 3 seeded bug clusters
-  test_*.py                     # 56 unit/integration tests, all passing
+├── fixtures/                    # synthetic regression: 3 seeded bug clusters + 1 ambiguous case
+└── test_*.py                    # 56 unit/integration tests
+
 real_data/
-  picorv32_patches/start_single.S  # per-test isolation patch for PicoRV32's harness
-  runs/*.log                    # REAL Icarus Verilog simulation output (see Phase 4)
+├── picorv32_patches/start_single.S   # per-test isolation patch for PicoRV32's harness
+└── runs/*.log                        # real Icarus Verilog simulation output
+
 scripts/
-  run_single_picorv32_test.sh   # builds + simulates one PicoRV32 test in isolation
-  generate_dashboard.py          # produces a dashboard HTML from the fixture data
-vendor/agentmesh/                # git submodule: the real AgentMesh core (reused, not forked)
+├── run_single_picorv32_test.sh  # builds + simulates one PicoRV32 test in isolation
+└── generate_dashboard.py        # produces a dashboard HTML from fixture data
+
+vendor/agentmesh/                # git submodule — the real AgentMesh core, reused unmodified
 ```
 
-### Parsing layer
+---
 
-- **Regression Parser** — line-oriented `TEST: ... SEED: ... STATUS: ... TIME: ...`
-  format (adapt the regex to your actual regression-runner output). Bad lines
-  are collected as errors rather than aborting the parse; `parse_rate` tracks
-  Objective #1 (≥95% parsed without manual intervention).
-- **Coverage Parser** — simplified UCIS-style text export: covergroups,
-  coverpoints, crosses, bin hit counts, and per-module code coverage
-  (line/branch/toggle/FSM). `CoverageReport.coverage_holes()` returns every
-  zero-hit bin.
-- **Log Signature Extractor** — pulls `UVM_ERROR`/`UVM_FATAL` lines into a
-  `FailureSignature` per test: sorted, deduplicated message IDs + hierarchy
-  paths. This structured key is what the Clusterer Agent (Phase 3) groups on
-  before falling back to LLM semantic grouping — deliberately *not* raw
-  message text, so clustering is auditable.
-
-The test fixtures encode 3 synthetic root causes across 7 failing tests
-(ALU overflow, FIFO full-write, APB reset glitch, plus one deliberately
-ambiguous 4th failure) specifically so `test_log_signature.py` can assert
-same-root-cause tests share a feature key and different root causes don't
-collide — a small-scale rehearsal of the Objective #2 cluster-purity
-methodology described in the proposal (Section 7).
-
-### Clusterer Agent (`triage/agents/clusterer.py`)
-
-Pure code, no LLM calls — the part of Section 5.2's Clusterer that's fully
-deterministic and cluster-purity-testable on its own:
-
-1. **Exact match**: identical `feature_key()` (msg_ids + hierarchy_paths) →
-   merge with full confidence, `method="exact_key"`.
-2. **Fuzzy similarity**: weighted Jaccard over msg_ids/hierarchy_paths for
-   signatures that don't share an exact key (e.g. a run surfacing one extra
-   secondary symptom) → auto-merge above `AUTO_MERGE_THRESHOLD`,
-   `method="similarity"`.
-3. **LLM review band**: similarity in `REVIEW_THRESHOLD..AUTO_MERGE_THRESHOLD`
-   is genuinely ambiguous from structure alone — left as its own cluster with
-   `needs_llm_review=True` rather than guessed at. This is exactly the
-   "structured features don't cleanly separate" case Section 5.2 says should
-   fall back to LLM semantic grouping (that LLM call itself isn't implemented
-   yet — this module only decides which clusters need it).
-
-On the fixture set, this produces 3 correct clusters plus 1 case correctly
-flagged for review instead of silently merged or split:
-
-```
-cluster_000 [exact_key]  -> alu_overflow, alu_overflow_neg
-cluster_001 [exact_key]  -> fifo_full_write, fifo_almost_full
-cluster_002 [similarity] -> apb_reset, apb_reset_seed2
-cluster_003 [singleton, needs_llm_review=True] -> apb_addr_decode
-```
-
-## Why AgentMesh is a submodule, not a copy
-
-`vendor/agentmesh` pins a specific commit of the real, public
-`Cost-aware-agent-orchestration` repo. This keeps the reuse honest and
-verifiable — anyone can diff against upstream — rather than silently forking
-and drifting. `Mesh`, `Task`, `AdaptiveRouter`, and `Tracer` are imported
-unmodified; Phase 3 will add a `"triage"` entry to `ROLE_SEQUENCES` and new
-`clusterer`/`drafter`/`critic` role prompts, not fork the orchestration core.
-
-## Running the tests
+## Getting started
 
 ```bash
+git clone --recurse-submodules https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System.git
+cd Agentic-Verification-Triage-System
+
 pip install -e ".[dev]"
 pip install -e vendor/agentmesh
-git submodule update --init
-pytest -q
+
+pytest -q                                   # 56 tests, ~0.15s
+python3 scripts/generate_dashboard.py out.html   # generate the observability dashboard
 ```
 
-### Drafter Agent (`triage/agents/drafter.py`)
+## Component deep-dives
 
-Follows the same honest-generator split the vendored AgentMesh itself uses
-(`generators.py`'s `BackendGenerator` vs `TrivialStubGenerator`):
-`EvidenceBasedDraftGenerator` composes every field of a `BugDraft` — root
-cause, affected tests, evidence citations, priority score — directly from
-parsed `FailureSignature`/`CoverageReport` data. No LLM call, so it's
-deterministic, fully unit-tested, and structurally guarantees Objective #3
-("every bug list entry traceable to specific failing tests and coverage
-evidence — zero unsupported claims"): there's nothing in a draft that
-wasn't in the input evidence, and `test_every_evidence_citation_traces_to_real_input_data`
-checks exactly that.
+<details>
+<summary><b>Parsing Layer</b> — <code>triage/parsing/</code></summary>
 
-Priority score = severity component (FATAL > ERROR) + cluster-size
-component + linked-coverage-hole component, fully explained in
-`priority_rationale` rather than a black-box number. On the fixture set,
-the FIFO cluster (contains a `UVM_FATAL`) correctly outranks every
-ERROR-only cluster regardless of coverage-hole count, and the singleton
-ambiguous cluster from the Clusterer ranks lowest and stays flagged
-`needs_llm_review=True` rather than being drafted with false confidence.
+<br>
 
-Coverage/module relevance uses a stated keyword-overlap heuristic
-(`related_coverage_holes`/`related_code_coverage`) — e.g. hierarchy path
-`...fifo_agent.monitor` matches covergroup `fifo_cg` and module
-`fifo_unit` via the shared "fifo" token. This is an explicit heuristic,
-not a claim of true testbench-structure understanding; a production
-version would consume the testbench's actual module hierarchy map.
+- **Regression Parser** — line-oriented `TEST: ... SEED: ... STATUS: ... TIME: ...` format. Bad lines are
+  collected as errors rather than aborting the whole parse; `parse_rate` tracks the ≥95%-parsed objective.
+- **Coverage Parser** — simplified UCIS-style text export: covergroups, coverpoints, crosses, bin hit counts, and
+  per-module code coverage (line/branch/toggle/FSM). `CoverageReport.coverage_holes()` returns every zero-hit bin.
+- **Log Signature Extractor** — pulls `UVM_ERROR`/`UVM_FATAL` lines into a `FailureSignature` per test: sorted,
+  deduplicated message IDs + hierarchy paths. This structured key is what the Clusterer groups on, deliberately
+  *not* raw message text, so clustering stays auditable.
 
-A future `LLMDraftGenerator` would wrap `Mesh`/`AdaptiveRouter` (mirroring
-`BackendGenerator`) to turn this evidence into more polished prose, or to
-resolve `needs_llm_review` clusters the Clusterer couldn't merge on
-structure alone — not implemented yet.
+</details>
 
-### Critic Agent (`triage/agents/critic.py`)
+<details>
+<summary><b>Clusterer Agent</b> — <code>triage/agents/clusterer.py</code></summary>
 
-Independently reviews each `BugDraft` against the underlying evidence —
-deliberately by **re-deriving ground truth from the cluster/coverage data
-itself**, not by re-reading the Drafter's own evidence list. A critic that
-only checks internal consistency of what the Drafter already wrote can't
-catch a drafter that fabricated its evidence wholesale; this one
-re-parses each evidence citation and checks it against the actual
-`FailureSignature.events`, `CoverageReport.coverage_holes()`, and
-`CoverageReport.code_coverage`, independently recomputes the priority
-score, and scans the free-text root-cause line for identifiers that don't
-actually appear anywhere in the cluster.
+<br>
 
-Per the risk table ("Critic agent becomes a rubber stamp"), effectiveness
-is measured on **both axes**, not just catch rate:
+Pure code, no LLM calls:
 
-- `test_all_real_drafts_accepted_cleanly` / the false-negative half of
-  `test_critic_effectiveness_on_mutation_set` — honest, evidence-grounded
-  drafts must pass clean (0% false-negative rate)
-- the false-positive-catch half of the same test — 7 distinct injected
-  flaws (fabricated coverage hole, fabricated log event, fabricated code
-  coverage module, claiming an unrelated test, omitting a real test,
-  inflating the priority score, hallucinating an identifier in the root
-  cause) applied to every real draft, all must be caught (100% catch rate
-  on this labeled mutation set — a small-scale rehearsal of the Section 7
-  methodology's critic-effectiveness measurement, same "measure both
-  directions" discipline, smaller N)
+1. **Exact match** — identical `feature_key()` → merge with full confidence (`method="exact_key"`)
+2. **Fuzzy similarity** — weighted Jaccard over msg_ids/hierarchy_paths for near-misses → auto-merge above
+   `AUTO_MERGE_THRESHOLD` (`method="similarity"`)
+3. **LLM review band** — genuinely ambiguous cases are left as their own cluster with `needs_llm_review=True`
+   rather than guessed at
 
-On the real (non-mutated) fixture drafts the Critic accepts all 4 cleanly,
-since `EvidenceBasedDraftGenerator` is evidence-grounded by construction —
-which is itself informative: the interesting test is the mutation set,
-not the pass-through case.
+</details>
 
-## Next: Phase 4 — Bug seeding & real test harness
+<details>
+<summary><b>Drafter Agent</b> — <code>triage/agents/drafter.py</code></summary>
 
-Phases 1–3 are now complete against synthetic fixtures. The honest next
-step per the proposal (Section 7, "no claim will be published without a
-reproducible script") is to stop validating against hand-written fixtures
-and start validating against a **real** UVM regression:
+<br>
 
-- Pick one open-source design to start — PicoRV32 (small, easy to seed
-  controlled bugs in) rather than OpenTitan initially (larger surface,
-  save for later)
-- Seed a first batch of real bugs, run real regressions via
-  Verilator/Icarus, capture real regression summaries/coverage/logs
-- Adapt `regression_parser.py`/`coverage_parser.py`/`log_signature.py` to
-  whatever the real tool output actually looks like — this is where the
-  "≥95% parse rate" objective gets tested against reality instead of a
-  synthetic fixture built to match the parser
-- Once real signatures/coverage flow through, re-run the same
-  Clusterer → Drafter → Critic pipeline unchanged and see where cluster
-  purity actually lands against real seeded-bug ground truth
+`EvidenceBasedDraftGenerator` composes every field of a `BugDraft` — root cause, affected tests, evidence
+citations, priority score — directly from parsed data. No LLM call, so it's deterministic and structurally
+guarantees "zero unsupported claims": there's nothing in a draft that wasn't in the input evidence.
 
-Separately (can happen in parallel): wire an actual LLM call through
-`Mesh`/`AdaptiveRouter` for `needs_llm_review` clusters and add `"triage"`
-to `ROLE_SEQUENCES` so every step gets traced the same way
-planner/coder/critic are today — deferred because it needs either a real
-model endpoint or an API-key-backed generator (the vendored submodule's
-simulated backend only produces placeholder text), and is lower-value
-than getting real regression data flowing first.
+</details>
+
+<details>
+<summary><b>Critic Agent</b> — <code>triage/agents/critic.py</code></summary>
+
+<br>
+
+Independently re-derives ground truth from the cluster/coverage data itself — not a re-read of the Drafter's own
+evidence list — and checks every claim against it: affected tests, each log/coverage/code-coverage citation, the
+free-text root-cause line, and the priority score. Measured on both false-positive-catch rate and false-negative
+rate via a 7-flaw-type mutation test, so a rubber-stamp critic can't inflate its own score.
+
+</details>
+
+<details>
+<summary><b>Traced Pipeline & Dashboard</b> — <code>triage/pipeline.py</code>, <code>triage/dashboard.py</code></summary>
+
+<br>
+
+Every stage and every individual decision (each cluster assignment, drafted entry, critic verdict) is wrapped in
+an OTel-shaped span from AgentMesh's `Tracer`, reused unmodified. `test_pipeline_matches_standalone_agent_results`
+confirms tracing is purely observational — it doesn't change pipeline behavior. The dashboard is a single
+self-contained HTML file (no server) showing the stage timeline, clustering method breakdown, critic override
+rate, and a priority-ranked cluster table.
+
+</details>
+
+---
+
+## What's next
+
+1. **OpenTitan** — a real UVM environment, needed to validate the Clusterer's actual log-signature logic (PicoRV32
+   proved the harness and parser; it can't prove cluster purity without structured `UVM_ERROR` logs)
+2. **Evaluation report** (Phase 6) — blocked on (1): needs real seeded-bug ground truth at the proposal's target
+   scale (15–25 bugs) to report cluster purity, drafting accuracy, and critic effectiveness honestly
+3. **Documentation & demo** (Phase 7) — the least blocked remaining piece
+
+---
+
+<div align="center">
+
+*Every accuracy or performance claim in this repo is backed by a reproducible script. Anything not yet fully
+verified is labeled as such rather than implied to be production-ready.*
+
+</div>
