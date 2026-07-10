@@ -6,17 +6,94 @@ retargeting [AgentMesh](https://github.com/ArchanaChetan07/Cost-aware-agent-orch
 domain. See `Agentic_Verification_Triage_System_Proposal.md` for the full
 design doc.
 
-## Status: Phase 3 of 7 — Clusterer + Drafter + Critic ✅
+## Status: Phase 4 of 7 — in progress (real infra proven; harness design issue found)
 
 | Phase | Status |
 |---|---|
 | 1. Domain onboarding | done (this repo) |
 | 2. Parsing layer | done |
-| **3. AgentMesh retargeting** | **done — Clusterer, Drafter, Critic all implemented** |
-| 4. Bug seeding & test harness (real OpenTitan/PicoRV32 regressions) | not started |
+| 3. AgentMesh retargeting | done — Clusterer, Drafter, Critic all implemented |
+| **4. Bug seeding & test harness** | **real toolchain/simulator/design working; harness redesign needed before real bug seeding produces usable multi-test regressions — see below** |
 | 5. Observability integration | not started |
 | 6. Evaluation & validation report | not started |
 | 7. Documentation & demo | not started |
+
+### Phase 4 progress: what's real so far
+
+Set up an actual, working simulation pipeline in-sandbox — no synthetic
+data involved:
+
+- **Real toolchain**: `gcc-riscv64-unknown-elf` (Ubuntu package) with full
+  RV32 multilib support, compiling real firmware
+- **Real simulator**: Icarus Verilog 12.0 (`iverilog`/`vvp`)
+- **Real design**: [PicoRV32](https://github.com/YosysHQ/picorv32) (the
+  proposal's Appendix pick for "controlled, easily-labeled bug seeding"),
+  built and simulated unmodified — `ALL TESTS PASSED`, including all 45
+  individual RV32IM instruction tests under `tests/*.S`
+
+### Real finding: the stock harness can't produce a multi-failure regression as-is
+
+PicoRV32's `firmware/start.S` links **all 45 instruction tests into one
+linear firmware image**, executed as a single simulation. Each test signals
+pass/fail by writing `OK`/`ERROR` to a memory-mapped print port, and a
+failing test executes `ebreak` — which, in this design, **permanently halts
+the CPU** (there's no debugger to resume it). There is no per-test
+isolation: it's one simulation, one linear instruction stream.
+
+This was discovered empirically, not by reading docs first: I seeded two
+RTL bugs into `picorv32.v` —
+
+1. `alu_add_sub` forced to always add (`instr_sub ? ... : ...` → always the
+   `+` branch) — intended to break only the `sub` test
+2. `alu_shr`'s sign-extend bit hardcoded to `1'b0` — intended to break `sra`
+   and `srai` together (a real 2-test, 1-root-cause case, matching exactly
+   the correlated-failure scenario our synthetic fixtures modeled)
+
+Rerunning the regression, the **first** test to fail was `auipc` — not
+`sub` or `sra` at all. `auipc.S`'s compiler-generated code happened to
+contain a `sub` instruction (likely stack/pointer arithmetic in its
+prologue), so bug #1 corrupted it before the CPU ever reached the tests I
+meant to target. And because `ebreak` halts the CPU permanently, the
+simulation stopped right there — `sub`, `sra`, and `srai` never ran, pass
+or fail. (Confirmed by checking `start.S`'s test order: `auipc` at line
+404, `srai`/`sub`/`sra` at lines 433–441 — the CPU never got that far.)
+
+Two real, reportable lessons from this, consistent with the proposal's
+own risk-mitigation discipline (Section 9: budget explicit time for
+adapting reused/external interfaces rather than assuming a drop-in fit):
+
+1. **A "one-instruction" bug isn't isolated** if that instruction is
+   something the compiler emits for unrelated code (subtraction is
+   everywhere in generated prologues/pointer arithmetic) — seeded bugs
+   need to be chosen for genuine blast-radius control, not just semantic
+   narrowness.
+2. **A monolithic, halt-on-first-failure firmware image is structurally
+   the wrong shape** for a multi-test regression. To get real per-test
+   pass/fail/timeout data (matching what `regression_parser.py` expects
+   and what a real UVM regression actually looks like — many independent
+   test runs, not one linear program), each test needs to run as its own
+   isolated simulation.
+
+### Next: harness fix, then real bug seeding
+
+- Build a minimal per-test firmware harness: one simulation per test
+  (reuse `start.o`'s setup code, but call exactly one test function and
+  halt cleanly, rather than chaining all 45) — this makes each test
+  independently pass/fail/timeout, the way a real regression list works
+- Re-seed the two bugs above (they're still good choices — `sra`/`srai`
+  in particular is a clean real 2-test/1-root-cause case) against the
+  per-test harness and confirm blast radius is actually contained this
+  time
+- Convert the real console `testname..OK`/`testname..ERROR` output into
+  our existing `TEST: ... SEED: ... STATUS: ... TIME: ...` format (a small
+  adapter script, not a parser rewrite) and run it through the real
+  Parsing → Clusterer → Drafter → Critic pipeline already built in Phases
+  2–3, unchanged
+- Scale up from 2 to the proposal's target 15–25 seeded bugs once the
+  per-test harness is confirmed working, then move to OpenTitan for a
+  true UVM environment (PicoRV32's testbench, as this session found, is
+  plain Verilog, not UVM/class-based — fine for this harness-validation
+  step, but Section 7's real methodology needs a UVM-based design)
 
 ## What's here
 
