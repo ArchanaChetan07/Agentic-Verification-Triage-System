@@ -1,0 +1,59 @@
+/usr/lib/gcc/riscv64-unknown-elf/13.2.0/../../../riscv64-unknown-elf/bin/ld: warning: /tmp/tmp.laKYRuK41u/firmware.elf has a LOAD segment with RWX permissions
+--- raw sim output for beq ---
+hello world
+beq..OK
+ 1st prime is 2.
+ 2nd prime is 3.
+ 3rd prime is 5.
+ 4th prime is 7.
+ 5th prime is 1E.
+ 6th prime is 1G.
+ 7th prime is 1K.
+ 8th prime is 1M.
+ 9th prime is 3e.
+1Dth prime is 3k.
+1Eth prime is 3m.
+1Fth prime is 3s.
+1Gth prime is 7Ÿ.
+1Hth prime is 7¡.
+1Ith prime is 7¥.
+1Jth prime is 7«.
+1Kth prime is 7±.
+1Lth prime is 7³.
+1Mth prime is 7¹.
+3bth prime is 7½.
+3cth prime is 7¿.
+3dth prime is 7Å.
+3eth prime is 1I.
+3fth prime is 1I.
+3gth prime is 1I'.
+3hth prime is 1I+.
+3ith prime is 1I-.
+3jth prime is 1I1.
+3kth prime is 1I3.
+3lth prime is 1I7.
+3mth prime is 1IE.
+checksum: 1772A48F OK
+input     [FFFFFFFF] 80000000 [FFFFFFFF] FFFFFFFF
+hard mul   80000000  00000000  80000000  7FFFFFFF
+soft mul   80000000  00000000  80000000  7FFFFFFF   OK
+hard div   80000000  00000000  00000000  80000000
+soft div   00000000  00000000  80000000  80000000  ERROR!
+
+------------------------------------------------------------
+EBREAK instruction at 0x0000135C
+pc  00001360    x8  80000000    x16 FFFFFFFF    x24 00003000
+x1  0000135C    x9  FFFFFFFF    x17 00000040    x25 80000000
+x2  0001FFA0    x10 00002B97    x18 00003000    x26 00003000
+x3  DEADBEEF    x11 FFFFFFFC    x19 00000000    x27 00003000
+x4  DEADBEEF    x12 0000FFFF    x20 80000000    x28 00000000
+x5  00000E30    x13 10000000    x21 00000000    x29 00000001
+x6  00000020    x14 10000000    x22 00000000    x30 00000000
+x7  00000000    x15 00000000    x23 00003000    x31 00000000
+------------------------------------------------------------
+Number of fast external IRQs counted: 1F
+Number of slow external IRQs counted: 1
+Number of timer IRQs counted: 1
+TRAP after 125201 clock cycles
+ERROR!
+testbench.v:270: $finish called at 1253110000 (1ps)

@@ -8,7 +8,7 @@ Built by retargeting [AgentMesh](https://github.com/ArchanaChetan07/Cost-aware-a
 multi-agent orchestration engine (planner → agent roles → critic, adaptive routing, full OTel tracing) — at a new
 domain: chip verification.
 
-[![Tests](https://img.shields.io/badge/tests-56%20passing-4fd39a)](#getting-started)
+[![Tests](https://img.shields.io/badge/tests-57%20passing-4fd39a)](#getting-started)
 [![Phase](https://img.shields.io/badge/phase-5%20of%207-5aa9ff)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-8b93a1)](LICENSE)
 
@@ -171,7 +171,7 @@ flowchart LR
 **Test suite**
 
 ```
-56 passed in 0.14s
+57 passed in 0.15s
 
 test_regression_parser.py    ✓ 7
 test_coverage_parser.py      ✓ 4
@@ -179,7 +179,7 @@ test_log_signature.py        ✓ 5
 test_clusterer.py            ✓ 8
 test_drafter.py              ✓ 10
 test_critic.py                ✓ 5
-test_pipeline.py              ✓ 8
+test_pipeline.py              ✓ 9
 test_dashboard.py             ✓ 6
 test_real_data_integration.py ✓ 3
 ```
@@ -273,6 +273,48 @@ there's no `UVM_ERROR`/message-ID/hierarchy structure for `log_signature.py` to 
 *harness and parser* work, but the Clusterer's actual log-signature logic still needs a real UVM environment
 (OpenTitan) to validate against. That's the honest scope of Phase 4 today — confirmed rather than worked around.
 
+### Real-data pipeline run: `scripts/run_real_data_pipeline.py`
+
+Wired the real SUB-bug regression above through the **full** traced pipeline + dashboard, not just the parser.
+Result, exactly as predicted by the structured-log gap: `sub` and `auipc` — genuinely correlated by one real RTL
+bug — get identical **empty** `FailureSignature`s (no `UVM_ERROR` lines to extract from), so the Clusterer
+trivially merges them into one `exact_key` cluster. `test_pipeline_runs_end_to_end_on_real_picorv32_data` asserts
+exactly this outcome, framed honestly as a plumbing/infra proof ("the pipeline survives real data end-to-end"),
+not a cluster-purity result — there's no structured signal here for clustering *quality* to be measured against.
+
+### Empirical check: does real UVM even run on the open-source tools available here?
+
+Before committing more time to OpenTitan, this was tested directly rather than assumed:
+
+```
+UVM source: real Accellera reference implementation (accellera-official/uvm-core)
+Minimal testbench: one component, run_phase, one `uvm_info` call
+
+Icarus Verilog 12.0  → fails immediately (syntax error in uvm_hdl.svh, a DPI header)
+Verilator 5.020      → fails on uvm_phase_hopper::type_id::create(...) —
+                        a parameterized-class static-member pattern used
+                        throughout UVM's core, not an edge case
+```
+
+This matches public reporting (Antmicro/PlanV, 2023–2024): Verilator's UVM support is real and actively
+improving, but still has gaps in exactly this area as of recent builds — this isn't a misconfiguration, it's a
+genuine, documented tooling gap. **OpenTitan's actual DV testbenches use real UVM, so they hit this same wall** —
+the problem isn't OpenTitan specifically, it's "real class-based UVM needs VCS/Questa/Xcelium," none of which are
+available in this environment.
+
+**Realistic paths forward, in order of how likely they are to actually work here:**
+
+1. **pyuvm + cocotb** — a Python reimplementation of UVM's methodology (components, phases, objections,
+   sequences) that runs on top of Verilator/Icarus via cocotb's VPI/DPI bridge. Real, working, actively
+   maintained — would give genuinely UVM-methodology-structured verification data, just not literally
+   SystemVerilog `UVM_ERROR` macros, meaning `log_signature.py` would need adapting (not replacing) to pyuvm's
+   own structured logging shape
+2. **Hand-rolled UVM-style structured logging** on top of the already-working Icarus/PicoRV32 harness — not
+   real UVM, but real simulation + real bugs + a disciplined `msg_id`/hierarchy tagging convention matching
+   what `log_signature.py` already expects, without depending on a library that doesn't run here
+3. **Build a patched/bleeding-edge Verilator from source** with the community UVM patches referenced above —
+   highest effort, still no guarantee of success given even late-2024 posts describe ongoing gaps
+
 ---
 
 ## Design decisions
@@ -314,15 +356,18 @@ triage/
 
 tests/
 ├── fixtures/                    # synthetic regression: 3 seeded bug clusters + 1 ambiguous case
-└── test_*.py                    # 56 unit/integration tests
+└── test_*.py                    # 57 unit/integration tests
 
 real_data/
 ├── picorv32_patches/start_single.S   # per-test isolation patch for PicoRV32's harness
-└── runs/*.log                        # real Icarus Verilog simulation output
+└── runs/
+    ├── *.log                         # real Icarus Verilog simulation output (regression summaries)
+    └── raw_logs/*.log                # real per-test raw console output (no UVM structure — see below)
 
 scripts/
 ├── run_single_picorv32_test.sh  # builds + simulates one PicoRV32 test in isolation
-└── generate_dashboard.py        # produces a dashboard HTML from fixture data
+├── generate_dashboard.py        # produces a dashboard HTML from fixture data
+└── run_real_data_pipeline.py    # runs the full pipeline against real PicoRV32 data
 
 vendor/agentmesh/                # git submodule — the real AgentMesh core, reused unmodified
 ```
@@ -338,7 +383,7 @@ cd Agentic-Verification-Triage-System
 pip install -e ".[dev]"
 pip install -e vendor/agentmesh
 
-pytest -q                                   # 56 tests, ~0.15s
+pytest -q                                   # 57 tests, ~0.26s
 python3 scripts/generate_dashboard.py out.html   # generate the observability dashboard
 ```
 
@@ -414,8 +459,9 @@ rate, and a priority-ranked cluster table.
 
 ## What's next
 
-1. **OpenTitan** — a real UVM environment, needed to validate the Clusterer's actual log-signature logic (PicoRV32
-   proved the harness and parser; it can't prove cluster purity without structured `UVM_ERROR` logs)
+1. **Decide the UVM path** — given the empirical finding above, pick between pyuvm+cocotb (most likely to
+   actually work), hand-rolled structured logging (fastest, least "real UVM"), or a from-source Verilator build
+   (highest effort, uncertain)
 2. **Evaluation report** (Phase 6) — blocked on (1): needs real seeded-bug ground truth at the proposal's target
    scale (15–25 bugs) to report cluster purity, drafting accuracy, and critic effectiveness honestly
 3. **Documentation & demo** (Phase 7) — the least blocked remaining piece

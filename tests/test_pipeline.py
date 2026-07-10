@@ -49,6 +49,37 @@ def test_pipeline_matches_standalone_agent_results():
     assert all(v.accepted for v in result.verdicts) == all(v.accepted for v in direct_verdicts)
 
 
+def test_pipeline_runs_end_to_end_on_real_picorv32_data():
+    """Real simulation data (real_data/runs/), not synthetic fixtures.
+
+    Honest expected outcome, not a cluster-purity claim: PicoRV32's console
+    output has no UVM_ERROR/msg_id/hierarchy structure, so both real
+    failing tests (sub, auipc — genuinely correlated by a real seeded RTL
+    bug, see README Phase 4) get empty FailureSignatures and trivially
+    merge into one exact_key cluster. This test exists to prove the
+    pipeline's plumbing survives real data end-to-end, not to claim
+    meaningful clustering happened — that needs a UVM environment.
+    """
+    real_data_dir = os.path.join(FIXTURES, "..", "..", "real_data", "runs")
+    reg_text = open(os.path.join(real_data_dir, "sub_bug_seeded_regression.log")).read()
+
+    logs_dir = os.path.join(real_data_dir, "raw_logs")
+    failure_logs = {}
+    for fname in os.listdir(logs_dir):
+        with open(os.path.join(logs_dir, fname), "rb") as f:
+            raw = f.read()
+        failure_logs[f"uvm_test_picorv32_{fname[:-4]}"] = raw.decode("utf-8", errors="replace")
+
+    result, tracer = run_triage_pipeline(reg_text, "", failure_logs)
+
+    assert result.parse_rate == 1.0
+    assert len(result.clusters) == 1
+    assert set(result.clusters[0].test_names) == {"uvm_test_picorv32_sub", "uvm_test_picorv32_auipc"}
+    assert result.clusters[0].method == "exact_key"  # trivial merge: both signatures are empty
+    assert len(result.accepted_drafts) == 1
+    assert len(tracer.spans) > 0
+
+
 def test_trace_has_expected_span_hierarchy():
     _, tracer = _run()
     names = [s.name for s in tracer.spans]
