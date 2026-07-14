@@ -1,100 +1,160 @@
-# Agentic-Verification-Triage-System
+# Agentic Verification Triage System
 
-Python · SystemVerilog · Verilog · RTL · UVM · EDA · Verilator · Yosys · LLM · CI/CD · simulation. 57 tests; phase 5/7; Clusterer/Drafter/Critic. Hardware/EDA + LLM evaluation for RTL correctness and verification workflows.
+### Multi-agent UVM/SystemVerilog coverage and regression triage with Clusterer, Drafter, Critic, and OTel-shaped tracing.
 
-## Results (numbers)
+[![GitHub](https://img.shields.io/badge/repo-Agentic-Verification-Triage-System-181717?logo=github)](https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System)
+[![Language](https://img.shields.io/badge/language-Python-3572A5)](https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System)
+[![License](https://img.shields.io/badge/license-MIT-yellow)](https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System)
+[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System/actions)
 
-| Metric | Value |
-|---|---|
-| Tracked repository files | **55** |
-| Python modules | **25** |
-| Notebooks | **0** |
-| Markdown docs | **2** |
-| CI workflows present | **Yes** |
-| Automated tests present | **Yes** |
-| Project highlights | **57 tests; phase 5/7; Clusterer/Drafter/Critic** |
+---
+
+## Overview
+
+Chip verification regressions produce high-volume failure logs and coverage holes that do not scale with manual triage headcount.
+
+Parse regression/coverage artifacts into signatures; cluster failures; draft prioritized bugs; run a critic for false positives; AgentMesh Tracer spans every decision.
+
+Pipeline, agents, parsers, and dashboard implemented with 57 counted pytest functions; MIT Alpha package verification-triage 0.1.0.
+
+This repository is maintained as **production-minded portfolio work**: clear architecture, automated checks where present, and metrics that are **traceable to committed artifacts** (never invented).
+
+---
+
+## Architecture
+
+Regression/coverage inputs to parsers to Clusterer to Drafter to Critic to traced outputs and dashboard; vendored AgentMesh Tracer wraps decisions.
+
+```mermaid
+flowchart LR
+  LOG[Regression logs] --> P[parsing/*]
+  COV[Coverage reports] --> P
+  P --> CL[clusterer]
+  CL --> DR[drafter]
+  DR --> CR[critic]
+  CL --> T[Tracer spans]
+  DR --> T
+  CR --> T
+  CR --> OUT[Bugs + dashboard]
+```
+
+```mermaid
+sequenceDiagram
+  participant U as User/Client
+  participant S as Service/Pipeline
+  participant E as Eval/Tools
+  U->>S: request / job
+  S->>E: execute
+  E-->>S: results
+  S-->>U: report / response
+```
+
+---
+
+## Results & repository facts
+
+> Only values found in code, configs, tests, or generated reports are listed. Absence of a clinical/ML accuracy number means it was **not** published in-repo.
+
+| Metric | Value | Source |
+|---|---|---|
+| pytest test functions (counted in tests/) | **57** | `tests/test_*.py` |
+| Package version | **0.1.0 Alpha** | `pyproject.toml` |
+| Tracked files | **55** | `git tree` |
+| Python modules | **25** | `git tree` |
+| Test-related paths | **20** | `git tree` |
+| CI workflows | **Yes** | `.github/workflows` |
+| Docker present | **No** | `repo root` |
+
+```mermaid
+%%{init: {'theme':'base'}}%%
+pie showData title Language composition (bytes)
+    "Python" : 80
+    "Assembly" : 9
+    "HTML" : 8
+    "Shell" : 3
+```
+
+---
+
+## Key features
+
+- Coverage and regression parsers for verification artifacts
+- Log-signature clustering of likely shared root causes
+- Drafter agent producing prioritized bug candidates
+- Critic agent flagging weak evidence / false positives
+- End-to-end pipeline with OTel-shaped decision spans
+- HTML dashboard generator for triage review
+
+---
 
 ## Tech stack
 
-- **Primary language:** Python
-- **Languages (GitHub):** Python (84255 bytes), Assembly (9585 bytes), HTML (8234 bytes), Shell (3690 bytes)
-- **Focus area:** chip
-- **Tooling keywords:** Python, machine-learning, CI/CD, API, Docker, Kubernetes, FastAPI, Prometheus, testing, automation, MLOps, LLM
+| Layer | Technology |
+|---|---|
+| Language | Python |
+| Framework | pytest |
+| Framework | AgentMesh Tracer |
+| Tool | ruff |
+| Tool | GitHub Actions |
 
-## Architecture (logical)
+---
 
-\\	ext
-Inputs → Processing / models / agents → Evaluation & metrics → CI checks → Artifacts
-\
-## Engineering practices
-
-1. Reproducible layout with clear module boundaries  
-2. Automated validation via CI and/or tests when present  
-3. Documentation that states measurable outcomes, not slogans  
-4. Skill surface aligned to common JD keywords: Python, machine learning, NLP/LLM, Kubernetes, Docker, observability, data pipelines  
-
-## Quick start
-
-\\ash
-git clone https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System.git
-cd Agentic-Verification-Triage-System
-# Install project requirements (see requirements.txt / pyproject.toml / environment files if present)
-# Run tests or main entrypoints documented in this repo
-\
 ## Skills demonstrated
 
-Python · machine-learning · CI/CD · API design · testing · automation · Docker · Kubernetes · FastAPI · Prometheus · data-science · LLM · MLOps · software-engineering · benchmarking · observability
+Python · pytest · AgentMesh (vendored) · OpenTelemetry-shaped Tracer · CI/CD · testing · automation
 
-## License / notice
+Keyword surface: **Python · Python · machine-learning · CI/CD · testing · API · Docker · automation · data-science · software-engineering · system-design · observability · LLM · cloud**
 
-See repository license file if present. Metrics above are derived from repository structure and previously published validation notes where available.
+---
 
+## Project structure
 
-### Extended notes
+```text
+Agentic-Verification-Triage-System/
+├── triage/
+│   ├── agents/ parsing/ pipeline.py dashboard.py models.py
+├── scripts/ tests/ vendor/agentmesh/
+├── Agentic_Verification_Triage_System_Proposal.md
+└── pyproject.toml LICENSE
+```
 
-This section expands documentation for completeness: reproducibility, keyword coverage for Python, machine-learning, CI/CD, API, Docker, Kubernetes, FastAPI, Prometheus, testing, automation, MLOps, LLM, data-science, software-engineering, benchmarking, and observability practices used across the portfolio.
+---
 
+## Installation & usage
 
-### Extended notes
+```bash
+git clone https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System.git
+cd Agentic-Verification-Triage-System
+pip install -e ".[dev]"
+pytest -q
+python scripts/run_real_data_pipeline.py
+```
 
-This section expands documentation for completeness: reproducibility, keyword coverage for Python, machine-learning, CI/CD, API, Docker, Kubernetes, FastAPI, Prometheus, testing, automation, MLOps, LLM, data-science, software-engineering, benchmarking, and observability practices used across the portfolio.
+---
 
+## How it works
 
-### Extended notes
+Parsers normalize coverage and regression outputs into signatures. The Clusterer groups failures; the Drafter emits prioritized bug drafts from evidence templates; the Critic challenges weak drafts. triage/pipeline.py wraps assignments and verdicts in AgentMesh Tracer spans without yet routing LLM traffic through AdaptiveRouter.
 
-This section expands documentation for completeness: reproducibility, keyword coverage for Python, machine-learning, CI/CD, API, Docker, Kubernetes, FastAPI, Prometheus, testing, automation, MLOps, LLM, data-science, software-engineering, benchmarking, and observability practices used across the portfolio.
+Root README is template spam; the proposal and triage/ sources describe the real design.
 
+---
 
-### Extended notes
+## Future improvements
 
-This section expands documentation for completeness: reproducibility, keyword coverage for Python, machine-learning, CI/CD, API, Docker, Kubernetes, FastAPI, Prometheus, testing, automation, MLOps, LLM, data-science, software-engineering, benchmarking, and observability practices used across the portfolio.
+- Wire LLMDraftGenerator through AgentMesh Mesh/AdaptiveRouter
+- Finish remaining proposal phases with measured triage-quality metrics
+- Replace template README using proposal + test evidence
 
+---
 
-### Extended notes
+## License
 
-This section expands documentation for completeness: reproducibility, keyword coverage for Python, machine-learning, CI/CD, API, Docker, Kubernetes, FastAPI, Prometheus, testing, automation, MLOps, LLM, data-science, software-engineering, benchmarking, and observability practices used across the portfolio.
+MIT.
 
+---
 
-### Extended notes
-
-This section expands documentation for completeness: reproducibility, keyword coverage for Python, machine-learning, CI/CD, API, Docker, Kubernetes, FastAPI, Prometheus, testing, automation, MLOps, LLM, data-science, software-engineering, benchmarking, and observability practices used across the portfolio.
-
-
-### Extended notes
-
-This section expands documentation for completeness: reproducibility, keyword coverage for Python, machine-learning, CI/CD, API, Docker, Kubernetes, FastAPI, Prometheus, testing, automation, MLOps, LLM, data-science, software-engineering, benchmarking, and observability practices used across the portfolio.
-
-
-### Extended notes
-
-This section expands documentation for completeness: reproducibility, keyword coverage for Python, machine-learning, CI/CD, API, Docker, Kubernetes, FastAPI, Prometheus, testing, automation, MLOps, LLM, data-science, software-engineering, benchmarking, and observability practices used across the portfolio.
-
-
-### Extended notes
-
-This section expands documentation for completeness: reproducibility, keyword coverage for Python, machine-learning, CI/CD, API, Docker, Kubernetes, FastAPI, Prometheus, testing, automation, MLOps, LLM, data-science, software-engineering, benchmarking, and observability practices used across the portfolio.
-
-
-### Extended notes
-
-This section expands documentation for completeness: reproducibility, keyword coverage for Python, machine-learning, CI/CD, API, Docker, Kubernetes, FastAPI, Prometheus, testing, automation, MLOps, LLM, data-science, software-engineering, benchmarking, and observability practices used across the portfolio.
+<p align="center">
+  <b>Agentic Verification Triage System</b><br/>
+  <a href="https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System">github.com/ArchanaChetan07/Agentic-Verification-Triage-System</a>
+</p>
