@@ -6,6 +6,7 @@
 [![Language](https://img.shields.io/badge/language-Python-3572A5)](https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System)
 [![License](https://img.shields.io/badge/license-MIT-yellow)](https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System/actions)
+[![Tests](https://img.shields.io/badge/pytest-57%2F57%20passing-1f8a4c)](tests/)
 
 ---
 
@@ -15,9 +16,17 @@ Chip verification regressions produce high-volume failure logs and coverage hole
 
 Parse regression/coverage artifacts into signatures; cluster failures; draft prioritized bugs; run a critic for false positives; AgentMesh Tracer spans every decision.
 
-Pipeline, agents, parsers, and dashboard implemented with 57 counted pytest functions; MIT Alpha package verification-triage 0.1.0.
+Pipeline, agents, parsers, and dashboard are implemented and validated by **57/57 passing tests**; the package is currently version 0.1.0 Alpha.
 
 This repository is maintained as **production-minded portfolio work**: clear architecture, automated checks where present, and metrics that are **traceable to committed artifacts** (never invented).
+
+---
+
+## Trust & transparency
+
+> **The current Drafter is deterministic and template-generated, not an LLM.** `EvidenceBasedDraftGenerator` builds every draft from parsed `FailureSignature` and `CoverageReport` fields and labels the result exactly as `generator="evidence_template"`. The test `test_generator_is_labeled_not_llm` asserts that every generated draft retains that label, preventing template output from being presented as LLM-authored reasoning. `LLMDraftGenerator` is described only as future work and is not implemented.
+
+The real-data integration uses captured output from actual Icarus Verilog simulations of PicoRV32. It intentionally makes no model-quality or cluster-purity claim: these console logs lack structured UVM message IDs and hierarchy data, so the integration test validates end-to-end plumbing only. The hardware harness records unavailable random seeds as `SEED: N/A`, and `test_real_seeds_are_honestly_null_not_fabricated` verifies that the parser preserves them as `None` instead of fabricating values. The real run also passes an empty coverage report because that simulation did not collect coverage.
 
 ---
 
@@ -51,13 +60,24 @@ sequenceDiagram
 
 ---
 
+## Dependency and reuse
+
+`vendor/agentmesh` is a git submodule pinned to [ArchanaChetan07/Cost-aware-agent-orchestration](https://github.com/ArchanaChetan07/Cost-aware-agent-orchestration). The current integration reuses that repository's `agentmesh.telemetry.Tracer` unchanged to record OTel-shaped pipeline, cluster, draft, and critic spans; `triage/dashboard.py` consumes those spans for its dashboard model. It does **not** currently use AgentMesh `Mesh`/`AdaptiveRouter` or route any LLM calls, because the implemented Clusterer, Drafter, and Critic paths are deterministic.
+
+Clone with `--recurse-submodules` (or run `git submodule update --init --recursive`) so the pinned dependency is available.
+
+---
+
 ## Results & repository facts
 
 > Only values found in code, configs, tests, or generated reports are listed. Absence of a clinical/ML accuracy number means it was **not** published in-repo.
 
 | Metric | Value | Source |
 |---|---|---|
-| pytest test functions (counted in tests/) | **57** | `tests/test_*.py` |
+| Automated test suite | **57/57 passing (100%)** | `pytest -q` |
+| Real hardware-design integration | **PicoRV32 RTL simulation artifacts** | `tests/test_real_data_integration.py`, `tests/test_pipeline.py` |
+| Data-fabrication guard | **Unavailable seeds remain null** | `test_real_seeds_are_honestly_null_not_fabricated` |
+| Generator-label guard | **Template output is not labeled as LLM output** | `test_generator_is_labeled_not_llm` |
 | Package version | **0.1.0 Alpha** | `pyproject.toml` |
 | Tracked files | **55** | `git tree` |
 | Python modules | **25** | `git tree` |
@@ -123,7 +143,7 @@ Agentic-Verification-Triage-System/
 ## Installation & usage
 
 ```bash
-git clone https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System.git
+git clone --recurse-submodules https://github.com/ArchanaChetan07/Agentic-Verification-Triage-System.git
 cd Agentic-Verification-Triage-System
 pip install -e ".[dev]"
 pytest -q
@@ -134,9 +154,7 @@ python scripts/run_real_data_pipeline.py
 
 ## How it works
 
-Parsers normalize coverage and regression outputs into signatures. The Clusterer groups failures; the Drafter emits prioritized bug drafts from evidence templates; the Critic challenges weak drafts. triage/pipeline.py wraps assignments and verdicts in AgentMesh Tracer spans without yet routing LLM traffic through AdaptiveRouter.
-
-Root README is template spam; the proposal and triage/ sources describe the real design.
+Parsers normalize coverage and regression outputs into signatures. The Clusterer groups failures; the Drafter emits prioritized bug drafts from evidence templates; the Critic challenges weak drafts. `triage/pipeline.py` wraps assignments and verdicts in AgentMesh Tracer spans without yet routing LLM traffic through AdaptiveRouter.
 
 ---
 
@@ -144,7 +162,6 @@ Root README is template spam; the proposal and triage/ sources describe the real
 
 - Wire LLMDraftGenerator through AgentMesh Mesh/AdaptiveRouter
 - Finish remaining proposal phases with measured triage-quality metrics
-- Replace template README using proposal + test evidence
 
 ---
 
